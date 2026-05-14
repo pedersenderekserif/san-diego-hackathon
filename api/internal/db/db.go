@@ -26,7 +26,7 @@ func NewPostgresFromEnv(ctx context.Context) (*sql.DB, error) {
 
 	port := os.Getenv("PG_PORT")
 	if port == "" {
-		port = "5432"
+		port = "5477"
 	}
 
 	database := os.Getenv("PG_DATABASE")
