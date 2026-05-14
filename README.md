@@ -46,9 +46,44 @@ We're here to find out.
 # Clone the repo (you're probably already here)
 git clone https://github.com/pedersenderekserif/san-diego-hackathon
 cd san-diego-hackathon
+```
 
-# Unzip the Form 5500 dataset
-unzip datasets/form_5500.zip -d datasets/form_5500
+### 🐘 Start the Database
+
+Spin up a local PostgreSQL instance and load all datasets in one shot:
+
+```bash
+docker compose up --build
+```
+
+This will:
+1. Start a PostgreSQL 16 container on port `5432`
+2. Create the schema (`indexes`, `index_templates`, `reporting_plans`, `form_5500`)
+3. Load all datasets from `datasets/` automatically
+
+**Connection details:**
+
+| Setting  | Value       |
+|----------|-------------|
+| Host     | `localhost` |
+| Port     | `5432`      |
+| Database | `hackathon` |
+| User     | `hackathon` |
+| Password | `hackathon` |
+
+Connect with psql:
+
+```bash
+psql "postgres://hackathon:hackathon@localhost:5432/hackathon"
+```
+
+### 🌐 Start the API
+
+Set the DB env vars and run the Go API:
+
+```bash
+cd api
+PG_HOST=localhost PG_USER=hackathon PG_PASSWORD=hackathon PG_DATABASE=hackathon make start
 ```
 
 ---
