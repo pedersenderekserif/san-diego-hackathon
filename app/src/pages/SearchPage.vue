@@ -198,6 +198,7 @@ const payorOptions = ref([])
 const payorLoading = ref(false)
 const payorError = ref(null)
 const selectedPayorId = ref('')
+const aetnaEINs = ref(new Set())
 
 const filters = [
   { label: 'All Plans', value: 'all' },
@@ -207,15 +208,17 @@ const filters = [
 ]
 
 function mapFiling(f) {
+  const plainEIN = f.spons_dfe_ein ? f.spons_dfe_ein.replace(/-/g, '') : ''
+  const networks = aetnaEINs.value.has(plainEIN) ? ['Aetna'] : []
   return {
     ein: f.spons_dfe_ein,
     name: f.sponsor_dfe_name || f.spons_dfe_dba_name,
     state: f.spons_dfe_mail_us_state,
     planType: f.plan_name || 'Unknown',
     employees: f.tot_act_rtd_sep_benef_cnt ? parseInt(f.tot_act_rtd_sep_benef_cnt, 10) || null : null,
-    networks: [],
+    networks,
     industry: null,
-    hasPriceData: false
+    hasPriceData: networks.length > 0
   }
 }
 
@@ -234,7 +237,26 @@ let debounceTimer = null
 
 onMounted(() => {
   ensurePayorOptions()
+  loadAetnaEINs()
 })
+
+async function loadAetnaEINs() {
+  try {
+    const res = await fetch('/api/v1/aetna-mrf/plans')
+    if (!res.ok) return
+    const json = await res.json()
+    const plans = json?.data ?? []
+    const einSet = new Set()
+    for (const plan of plans) {
+      if (plan.plan_id_type === 'ein' || plan.plan_id_type === 'EIN') {
+        einSet.add(plan.plan_id.replace(/-/g, ''))
+      }
+    }
+    aetnaEINs.value = einSet
+  } catch {
+    // non-critical: silently ignore
+  }
+}
 
 function onInput() {
   clearTimeout(debounceTimer)

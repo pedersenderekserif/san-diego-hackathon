@@ -7,7 +7,8 @@ import (
 )
 
 type Handler struct {
-	DB *sql.DB
+	DB          *sql.DB
+	AetnaSource *AetnaSource
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

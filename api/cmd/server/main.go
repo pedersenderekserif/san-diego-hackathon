@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/pedersenderekserif/san-diego-hackathon/api/internal/db"
+	"github.com/pedersenderekserif/san-diego-hackathon/api/internal/handlers"
 	"github.com/pedersenderekserif/san-diego-hackathon/api/internal/router"
 )
 
@@ -22,9 +23,11 @@ func main() {
 	}
 	defer conn.Close()
 
+	aetnaSource := handlers.LoadAetnaSource(context.Background())
+
 	srv := &http.Server{
 		Addr:    ":" + port,
-		Handler: router.New(conn),
+		Handler: router.New(conn, aetnaSource),
 	}
 
 	log.Printf("api server listening on :%s", port)
