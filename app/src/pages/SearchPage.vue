@@ -35,7 +35,7 @@
         @change="onPayorChange"
         class="w-full bg-slate-900 border border-slate-700 focus:border-brand-500 focus:ring-1 focus:ring-brand-500 rounded-xl px-4 py-3 text-white outline-none transition-colors"
       >
-        <option value="" disabled>Select Payor</option>
+        <option value="select_payor">Select Payor</option>
         <option
           v-for="payor in payorOptions"
           :key="payor.payor_id"
@@ -346,6 +346,12 @@ function onPayorChange() {
   reportingPlans.value = []
   reportingPlansError.value = null
   error.value = null
+
+  if (selectedPayorId.value === 'select_payor') {
+    results.value = []
+    hasSearched.value = false
+    return
+  }
 
   const trimmed = query.value.trim()
   if (!trimmed && !selectedPayorId.value) {
