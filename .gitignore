@@ -1,0 +1,2 @@
+# ignore opened datasets used during local processing
+dataset/opened/**
