@@ -5,7 +5,7 @@
 
     <!-- Controls row -->
     <div class="flex flex-col sm:flex-row gap-6 mb-8">
-      <!-- Payor dropdown -->
+      <!-- Payor dropdown + funding checkbox -->
       <div class="flex-1">
         <label for="payor-filter" class="block text-sm font-medium text-slate-300 mb-2">Payor Network</label>
         <select
@@ -25,6 +25,18 @@
         </select>
         <p v-if="payorLoading" class="mt-2 text-xs text-slate-500">Loading payors...</p>
         <p v-else-if="payorError" class="mt-2 text-xs text-red-400">{{ payorError }}</p>
+        <div class="flex items-center gap-2 mt-3">
+          <input
+            id="funding-gen-asset-explorer"
+            type="checkbox"
+            v-model="fundingGenAssetOnly"
+            @change="onPayorChange"
+            class="h-4 w-4 rounded border-slate-600 bg-slate-900 text-brand-500 focus:ring-brand-500 focus:ring-offset-0"
+          />
+          <label for="funding-gen-asset-explorer" class="text-sm text-slate-400 select-none cursor-pointer">
+            General assets only (<code class="text-xs text-slate-500">FUNDING_GEN_ASSET_IND = 1</code>)
+          </label>
+        </div>
       </div>
 
       <!-- Stats card -->
@@ -60,7 +72,10 @@
               <th class="px-4 py-3 text-slate-400 font-medium">Plan Sponsor</th>
               <th class="px-4 py-3 text-slate-400 font-medium">EIN</th>
               <th class="px-4 py-3 text-slate-400 font-medium">State</th>
+              <th class="px-4 py-3 text-slate-400 font-medium">Plan Name</th>
               <th class="px-4 py-3 text-slate-400 font-medium">Plan Type</th>
+              <th class="px-4 py-3 text-slate-400 font-medium">Plan ID Type</th>
+              <th class="px-4 py-3 text-slate-400 font-medium">Market Type</th>
               <th class="px-4 py-3 text-slate-400 font-medium">Covered Lives</th>
               <th class="px-4 py-3 text-slate-400 font-medium">Networks</th>
             </tr>
@@ -74,7 +89,10 @@
               <td class="px-4 py-3 text-white font-medium">{{ row.name }}</td>
               <td class="px-4 py-3 text-slate-300 font-mono text-xs">{{ row.ein }}</td>
               <td class="px-4 py-3 text-slate-300">{{ row.state }}</td>
+              <td class="px-4 py-3 text-slate-300">{{ row.planName ?? '—' }}</td>
               <td class="px-4 py-3 text-slate-300">{{ row.planType }}</td>
+              <td class="px-4 py-3 text-slate-300">{{ row.planIdType ?? '—' }}</td>
+              <td class="px-4 py-3 text-slate-300">{{ row.planMarketType ?? '—' }}</td>
               <td class="px-4 py-3 text-slate-300">{{ row.employees?.toLocaleString() ?? '—' }}</td>
               <td class="px-4 py-3">
                 <span
@@ -121,11 +139,14 @@ const results = ref([])
 const loading = ref(false)
 const hasSearched = ref(false)
 const error = ref(null)
+const fundingGenAssetOnly = ref(false)
 
 const payorOptions = ref([])
 const payorLoading = ref(false)
 const payorError = ref(null)
 const selectedPayorId = ref('select_payor')
+
+const reportingPlanFilters = ref(null)
 
 const aetnaEINs = ref(new Set())
 const bcbsilEINs = ref(new Set())
@@ -154,6 +175,9 @@ function mapFiling(f, index) {
     name,
     state: f.spons_dfe_mail_us_state,
     planType: f.plan_name || 'Unknown',
+    planName: null,
+    planIdType: null,
+    planMarketType: null,
     employees: f.tot_act_rtd_sep_benef_cnt ? parseInt(f.tot_act_rtd_sep_benef_cnt, 10) || null : null,
     networks,
     hasPriceData: networks.length > 0
@@ -162,6 +186,7 @@ function mapFiling(f, index) {
 
 onMounted(() => {
   ensurePayorOptions()
+  ensureReportingPlanFilters()
   loadAetnaEINs()
   loadBCBSILEINs()
   loadBCBSTXEINs()
@@ -184,6 +209,68 @@ async function ensurePayorOptions() {
     return []
   } finally {
     payorLoading.value = false
+  }
+}
+
+async function ensureReportingPlanFilters() {
+  if (reportingPlanFilters.value) return reportingPlanFilters.value
+  try {
+    const res = await fetch('/api/v1/reporting-plans/filters')
+    const json = await res.json()
+    if (!res.ok) throw new Error(json?.error?.message ?? 'Failed to load filters')
+    reportingPlanFilters.value = json?.data ?? null
+    return reportingPlanFilters.value
+  } catch {
+    return null
+  }
+}
+
+async function enrichWithReportingPlans() {
+  const filters = await ensureReportingPlanFilters()
+  if (!filters) return
+
+  const eins = [...new Set(results.value.map(r => r.ein).filter(Boolean))]
+  if (eins.length === 0) return
+
+  const params = new URLSearchParams()
+  for (const ein of eins) params.append('eins', ein)
+  params.append('ingestor_ids', selectedPayorId.value)
+  for (const t of filters.plan_id_types ?? []) params.append('plan_id_types', t)
+  for (const m of filters.plan_market_types ?? []) params.append('plan_market_types', m)
+
+  // BCBSIL/BCBSTX don't require plan_market_types — add a dummy if missing so the
+  // API doesn't reject with "missing_filters" for non-BCBS payors.
+  if ((filters.plan_market_types ?? []).length === 0) {
+    params.append('plan_market_types', 'group')
+  }
+
+  try {
+    const res = await fetch(`/api/v1/reporting-plans?${params.toString()}`)
+    if (!res.ok) return
+    const json = await res.json()
+    const plans = json?.data ?? []
+
+    const planByEIN = new Map()
+    for (const p of plans) {
+      const key = p.plan_id.replace(/-/g, '')
+      if (!planByEIN.has(key)) planByEIN.set(key, p)
+    }
+
+    // Mutate through results.value so Vue's reactivity picks up the changes
+    for (let i = 0; i < results.value.length; i++) {
+      const key = (results.value[i].ein ?? '').replace(/-/g, '')
+      const plan = planByEIN.get(key)
+      if (plan) {
+        results.value[i] = {
+          ...results.value[i],
+          planName: plan.plan_name || null,
+          planIdType: plan.plan_id_type || null,
+          planMarketType: plan.plan_market_type || null
+        }
+      }
+    }
+  } catch {
+    // non-critical: silently ignore
   }
 }
 
@@ -255,6 +342,9 @@ async function fetchByPayor() {
     const params = new URLSearchParams()
     params.set('q', '')
     params.append('payor_id', selectedPayorId.value)
+    if (fundingGenAssetOnly.value) {
+      params.set('funding_gen_asset_ind', '1')
+    }
 
     const res = await fetch(`/api/v1/form-5500?${params.toString()}`)
     const json = await res.json()
@@ -262,7 +352,9 @@ async function fetchByPayor() {
       error.value = json?.error?.message ?? 'An error occurred'
       results.value = []
     } else {
-      results.value = (json.data ?? []).map((f, i) => mapFiling(f, i))
+      const mapped = (json.data ?? []).map((f, i) => mapFiling(f, i))
+      results.value = mapped
+      enrichWithReportingPlans()
     }
     hasSearched.value = true
   } catch {

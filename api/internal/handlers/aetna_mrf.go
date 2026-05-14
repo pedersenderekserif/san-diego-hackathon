@@ -8,7 +8,7 @@ import (
 	"net/http"
 )
 
-const aetnaMRFMetadataURL = "https://mrf.healthsparq.com/aetnacvs-egress.nophi.kyruushsq.com/prd/mrf/AETNACVS_I/ALICUNDER100/latest_metadata.json"
+const aetnaMRFMetadataURL = "https://mrf.healthsparq.com/aetnacvs-egress.nophi.kyruushsq.com/prd/mrf/AETNACVS_I/ALICSI/latest_metadata.json"
 
 type aetnaMRFReportingPlan struct {
 	PlanName       string `json:"planName"`

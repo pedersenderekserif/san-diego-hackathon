@@ -90,8 +90,7 @@ func (h *Handler) ListForm5500(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
-
-	// Expand each EIN to both plain and dashed forms so either format matches.
+	fundingGenAsset := r.URL.Query().Get("funding_gen_asset_ind") == "1"
 	normalizedEINs := make([]string, 0, len(eins)*2)
 	for _, ein := range eins {
 		plain, dashed := einVariants(ein)
@@ -125,7 +124,7 @@ func (h *Handler) ListForm5500(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		filings, err = queryForm5500Aetna(r.Context(), h.DB, eins, sponsorNames, q, h.AetnaSource.EINSet())
+		filings, err = queryForm5500Aetna(r.Context(), h.DB, eins, sponsorNames, q, h.AetnaSource.EINSet(), fundingGenAsset)
 	} else if isBCBSIL {
 		if h.BCBSILSource == nil {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]any{
@@ -136,7 +135,7 @@ func (h *Handler) ListForm5500(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		filings, err = queryForm5500BCBSIL(r.Context(), h.DB, eins, sponsorNames, q, h.BCBSILSource.EINSet())
+		filings, err = queryForm5500BCBSIL(r.Context(), h.DB, eins, sponsorNames, q, h.BCBSILSource.EINSet(), fundingGenAsset)
 	} else if isBCBSTX {
 		if h.BCBSTXSource == nil {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]any{
@@ -147,9 +146,9 @@ func (h *Handler) ListForm5500(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		filings, err = queryForm5500BCBSTX(r.Context(), h.DB, eins, sponsorNames, q, h.BCBSTXSource.EINSet())
+		filings, err = queryForm5500BCBSTX(r.Context(), h.DB, eins, sponsorNames, q, h.BCBSTXSource.EINSet(), fundingGenAsset)
 	} else {
-		filings, err = queryForm5500(r.Context(), h.DB, eins, sponsorNames, q, payorIDs)
+		filings, err = queryForm5500(r.Context(), h.DB, eins, sponsorNames, q, payorIDs, fundingGenAsset)
 	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{
@@ -169,7 +168,7 @@ func (h *Handler) ListForm5500(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func queryForm5500(ctx context.Context, conn *sql.DB, eins, sponsorNames []string, q string, payorIDs []string) ([]form5500, error) {
+func queryForm5500(ctx context.Context, conn *sql.DB, eins, sponsorNames []string, q string, payorIDs []string, fundingGenAsset bool) ([]form5500, error) {
 	args := make([]any, 0, len(eins)+len(sponsorNames)+2)
 	searchConditions := make([]string, 0, 3)
 	scopeConditions := make([]string, 0, 1)
@@ -238,7 +237,10 @@ func queryForm5500(ctx context.Context, conn *sql.DB, eins, sponsorNames []strin
 		}
 	}
 
-	whereParts := make([]string, 0, 2)
+	whereParts := make([]string, 0, 3)
+	if fundingGenAsset {
+		whereParts = append(whereParts, "funding_gen_asset_ind = '1'")
+	}
 	if len(searchConditions) > 0 {
 		whereParts = append(whereParts, "("+strings.Join(searchConditions, " or ")+")")
 	}
@@ -306,7 +308,7 @@ where %s
 // queryForm5500Aetna queries form_5500 records scoped to the EINs present in the
 // Aetna MRF in-memory source, instead of going through the reporting_plans/indexes
 // DB subquery used for other payors.
-func queryForm5500Aetna(ctx context.Context, conn *sql.DB, eins, sponsorNames []string, q string, aetnaEINs map[string]struct{}) ([]form5500, error) {
+func queryForm5500Aetna(ctx context.Context, conn *sql.DB, eins, sponsorNames []string, q string, aetnaEINs map[string]struct{}, fundingGenAsset bool) ([]form5500, error) {
 	if len(aetnaEINs) == 0 {
 		return []form5500{}, nil
 	}
@@ -367,6 +369,9 @@ func queryForm5500Aetna(ctx context.Context, conn *sql.DB, eins, sponsorNames []
 	_ = nextPlaceholder
 
 	whereParts := []string{scopeCondition}
+	if fundingGenAsset {
+		whereParts = append(whereParts, "funding_gen_asset_ind = '1'")
+	}
 	if len(searchConditions) > 0 {
 		whereParts = append(whereParts, "("+strings.Join(searchConditions, " or ")+")")
 	}
@@ -431,7 +436,7 @@ where %s
 // queryForm5500BCBSIL queries form_5500 records scoped to the EINs present in
 // the BCBSIL MRF in-memory source, instead of going through the
 // reporting_plans/indexes DB subquery used for other payors.
-func queryForm5500BCBSIL(ctx context.Context, conn *sql.DB, eins, sponsorNames []string, q string, bcbsilEINs map[string]struct{}) ([]form5500, error) {
+func queryForm5500BCBSIL(ctx context.Context, conn *sql.DB, eins, sponsorNames []string, q string, bcbsilEINs map[string]struct{}, fundingGenAsset bool) ([]form5500, error) {
 if len(bcbsilEINs) == 0 {
 return []form5500{}, nil
 }
@@ -492,6 +497,9 @@ nextPlaceholder += 2
 _ = nextPlaceholder
 
 whereParts := []string{scopeCondition}
+if fundingGenAsset {
+whereParts = append(whereParts, "funding_gen_asset_ind = '1'")
+}
 if len(searchConditions) > 0 {
 whereParts = append(whereParts, "("+strings.Join(searchConditions, " or ")+")")
 }
@@ -556,7 +564,7 @@ return result, rows.Err()
 // queryForm5500BCBSTX queries form_5500 records scoped to the EINs present in
 // the BCBSTX MRF in-memory source, instead of going through the
 // reporting_plans/indexes DB subquery used for other payors.
-func queryForm5500BCBSTX(ctx context.Context, conn *sql.DB, eins, sponsorNames []string, q string, bcbstxEINs map[string]struct{}) ([]form5500, error) {
+func queryForm5500BCBSTX(ctx context.Context, conn *sql.DB, eins, sponsorNames []string, q string, bcbstxEINs map[string]struct{}, fundingGenAsset bool) ([]form5500, error) {
 if len(bcbstxEINs) == 0 {
 return []form5500{}, nil
 }
@@ -617,6 +625,9 @@ nextPlaceholder += 2
 _ = nextPlaceholder
 
 whereParts := []string{scopeCondition}
+if fundingGenAsset {
+whereParts = append(whereParts, "funding_gen_asset_ind = '1'")
+}
 if len(searchConditions) > 0 {
 whereParts = append(whereParts, "("+strings.Join(searchConditions, " or ")+")")
 }

@@ -49,7 +49,7 @@
     </div>
 
     <!-- Filter pills -->
-    <div class="flex flex-wrap gap-2 mb-8">
+    <div class="flex flex-wrap gap-2 mb-4">
       <button
         v-for="filter in filters"
         :key="filter.value"
@@ -63,6 +63,20 @@
       >
         {{ filter.label }}
       </button>
+    </div>
+
+    <!-- Funding filter checkbox -->
+    <div class="flex items-center gap-2 mb-8">
+      <input
+        id="funding-gen-asset"
+        type="checkbox"
+        v-model="fundingGenAssetOnly"
+        @change="onFundingFilterChange"
+        class="h-4 w-4 rounded border-slate-600 bg-slate-900 text-brand-500 focus:ring-brand-500 focus:ring-offset-0"
+      />
+      <label for="funding-gen-asset" class="text-sm text-slate-400 select-none cursor-pointer">
+        Only show plans funded through general assets (<code class="text-xs text-slate-500">FUNDING_GEN_ASSET_IND = 1</code>)
+      </label>
     </div>
 
     <!-- Error state -->
@@ -116,6 +130,8 @@
           </div>
           <div class="mt-3 flex items-center gap-4 text-xs text-slate-600">
             <span>{{ employer.planType }} plan</span>
+            <span v-if="employer.planName">· Plan: {{ employer.planName }}</span>
+            <span v-if="employer.planIdType">· Plan ID Type: {{ employer.planIdType }}</span>
             <span v-if="employer.employees">· {{ employer.employees.toLocaleString() }} covered lives</span>
             <span v-if="employer.hasPriceData" class="text-emerald-500">✓ Price data available</span>
             <span v-else class="text-amber-500">⚠ No price data</span>
@@ -187,6 +203,7 @@ const query = ref('')
 const loading = ref(false)
 const hasSearched = ref(false)
 const activeFilter = ref('all')
+const fundingGenAssetOnly = ref(false)
 const results = ref([])
 const error = ref(null)
 const selectedEmployer = ref(null)
@@ -223,6 +240,8 @@ function mapFiling(f, index) {
     name,
     state: f.spons_dfe_mail_us_state,
     planType: f.plan_name || 'Unknown',
+    planName: f.plan_name || null,
+    planIdType: f.type_plan_entity_cd || null,
     employees: f.tot_act_rtd_sep_benef_cnt ? parseInt(f.tot_act_rtd_sep_benef_cnt, 10) || null : null,
     networks,
     industry: null,
@@ -406,6 +425,14 @@ function onPayorChange() {
   search(trimmed)
 }
 
+function onFundingFilterChange() {
+  const trimmed = query.value.trim()
+  if (hasSearched.value || trimmed || selectedPayorId.value !== 'select_payor') {
+    loading.value = true
+    search(trimmed)
+  }
+}
+
 function onEmployerKeydown(event, employer) {
   if (event.key === 'Enter' || event.key === ' ') {
     event.preventDefault()
@@ -453,6 +480,9 @@ async function search(q) {
     params.set('q', q)
     if (selectedPayorId.value && selectedPayorId.value !== 'select_payor') {
       params.append('payor_id', selectedPayorId.value)
+    }
+    if (fundingGenAssetOnly.value) {
+      params.set('funding_gen_asset_ind', '1')
     }
 
     const res = await fetch(`/api/v1/form-5500?${params.toString()}`)
