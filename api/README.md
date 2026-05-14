@@ -20,8 +20,30 @@ Server defaults to port `8080` and can be overridden with `PORT`.
 
 ## Routes
 
+- `GET /v1/form-5500`
 - `GET /v1/reporting-plans/filters`
 - `GET /v1/reporting-plans`
+
+## Form 5500 Query Route
+
+`GET /v1/form-5500` searches self-funded employer filings.
+
+At least one of these filters is required:
+
+- `q` (free text for sponsor name or EIN)
+- `eins` (comma-separated EINs)
+- `sponsor_names` (comma-separated sponsor names)
+- `payor_ids` (comma-separated payor UUIDs)
+
+Optional network scoping:
+
+- `payor_ids` limits results to EINs that also appear in reporting plans for the selected payor network.
+
+Example:
+
+```bash
+curl "http://localhost:8080/v1/form-5500?q=acme&payor_ids=0f1d5e80-11f3-48df-a2cb-c2f2a760f7d2"
+```
 
 ## Reporting Plan Filters Route
 

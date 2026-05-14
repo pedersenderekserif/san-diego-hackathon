@@ -27,6 +27,27 @@
       </div>
     </div>
 
+    <div class="mb-4">
+      <label for="payor-filter" class="block text-sm font-medium text-slate-300 mb-2">Payor Network</label>
+      <select
+        id="payor-filter"
+        v-model="selectedPayorId"
+        @change="onPayorChange"
+        class="w-full bg-slate-900 border border-slate-700 focus:border-brand-500 focus:ring-1 focus:ring-brand-500 rounded-xl px-4 py-3 text-white outline-none transition-colors"
+      >
+        <option value="">All payors</option>
+        <option
+          v-for="payor in payorOptions"
+          :key="payor.payor_id"
+          :value="payor.payor_id"
+        >
+          {{ payor.payor_name }}
+        </option>
+      </select>
+      <p v-if="payorLoading" class="mt-2 text-xs text-slate-500">Loading payors...</p>
+      <p v-else-if="payorError" class="mt-2 text-xs text-red-400">{{ payorError }}</p>
+    </div>
+
     <!-- Filter pills -->
     <div class="flex flex-wrap gap-2 mb-8">
       <button
@@ -160,7 +181,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 
 const query = ref('')
 const loading = ref(false)
@@ -173,6 +194,10 @@ const reportingPlans = ref([])
 const reportingPlansLoading = ref(false)
 const reportingPlansError = ref(null)
 const reportingPlanFilters = ref(null)
+const payorOptions = ref([])
+const payorLoading = ref(false)
+const payorError = ref(null)
+const selectedPayorId = ref('')
 
 const filters = [
   { label: 'All Plans', value: 'all' },
@@ -207,6 +232,10 @@ function mapReportingPlan(plan) {
 
 let debounceTimer = null
 
+onMounted(() => {
+  ensurePayorOptions()
+})
+
 function onInput() {
   clearTimeout(debounceTimer)
   error.value = null
@@ -239,12 +268,41 @@ async function ensureReportingPlanFilters() {
   return reportingPlanFilters.value
 }
 
-function reportingPlanParams(ein, filters) {
+async function ensurePayorOptions() {
+  if (payorOptions.value.length > 0) {
+    return payorOptions.value
+  }
+
+  payorLoading.value = true
+  payorError.value = null
+
+  try {
+    const res = await fetch('/api/v1/index-templates/payors')
+    const json = await res.json()
+    if (!res.ok) {
+      throw new Error(json?.error?.message ?? 'Failed to load payors')
+    }
+
+    payorOptions.value = json?.data ?? []
+    return payorOptions.value
+  } catch (fetchError) {
+    payorError.value = fetchError?.message || 'Failed to load payors'
+    return []
+  } finally {
+    payorLoading.value = false
+  }
+}
+
+function reportingPlanParams(ein, filters, selectedPayor) {
   const params = new URLSearchParams()
   params.set('eins', ein)
 
-  for (const ingestorID of filters?.ingestor_ids ?? []) {
-    params.append('ingestor_ids', ingestorID)
+  if (selectedPayor) {
+    params.append('ingestor_ids', selectedPayor)
+  } else {
+    for (const ingestorID of filters?.ingestor_ids ?? []) {
+      params.append('ingestor_ids', ingestorID)
+    }
   }
   for (const planIDType of filters?.plan_id_types ?? []) {
     params.append('plan_id_types', planIDType)
@@ -254,6 +312,23 @@ function reportingPlanParams(ein, filters) {
   }
 
   return params
+}
+
+function onPayorChange() {
+  selectedEmployer.value = null
+  reportingPlans.value = []
+  reportingPlansError.value = null
+  error.value = null
+
+  const trimmed = query.value.trim()
+  if (!trimmed) {
+    results.value = []
+    hasSearched.value = false
+    return
+  }
+
+  loading.value = true
+  search(trimmed)
 }
 
 function onEmployerKeydown(event, employer) {
@@ -279,7 +354,7 @@ async function selectEmployer(employer) {
 
   try {
     const filters = await ensureReportingPlanFilters()
-    const params = reportingPlanParams(employer.ein, filters)
+    const params = reportingPlanParams(employer.ein, filters, selectedPayorId.value)
     const res = await fetch(`/api/v1/reporting-plans?${params.toString()}`)
     const json = await res.json()
     if (!res.ok) {
@@ -297,7 +372,13 @@ async function selectEmployer(employer) {
 
 async function search(q) {
   try {
-    const res = await fetch(`/api/v1/form-5500?q=${encodeURIComponent(q)}`)
+    const params = new URLSearchParams()
+    params.set('q', q)
+    if (selectedPayorId.value) {
+      params.append('payor_ids', selectedPayorId.value)
+    }
+
+    const res = await fetch(`/api/v1/form-5500?${params.toString()}`)
     const json = await res.json()
     if (!res.ok) {
       error.value = json?.error?.message ?? 'An error occurred'
