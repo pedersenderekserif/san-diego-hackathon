@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/pedersenderekserif/san-diego-hackathon/api/internal/db"
 )
 
 type index struct {
@@ -18,7 +17,7 @@ type index struct {
 	ArchivedAt *string   `json:"archived_at"`
 }
 
-func ListIndexes(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) ListIndexes(w http.ResponseWriter, r *http.Request) {
 	ingestorIDs, err := parseUUIDFilter(r, "ingestor_ids")
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
@@ -43,19 +42,7 @@ func ListIndexes(w http.ResponseWriter, r *http.Request) {
 	includeDeleted := r.URL.Query().Get("include_deleted") == "true"
 	includeArchived := r.URL.Query().Get("include_archived") == "true"
 
-	conn, err := db.NewPostgresFromEnv(r.Context())
-	if err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
-			"error": map[string]string{
-				"code":    "db_not_configured",
-				"message": "set PG_HOST, PG_USER, and PG_PASSWORD to enable this endpoint",
-			},
-		})
-		return
-	}
-	defer conn.Close()
-
-	indexes, err := queryIndexes(r.Context(), conn, ingestorIDs, includeDeleted, includeArchived)
+	indexes, err := queryIndexes(r.Context(), h.DB, ingestorIDs, includeDeleted, includeArchived)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{
 			"error": map[string]string{

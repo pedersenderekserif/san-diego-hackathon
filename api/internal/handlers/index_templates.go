@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/pedersenderekserif/san-diego-hackathon/api/internal/db"
 )
 
 type indexTemplate struct {
@@ -17,7 +16,7 @@ type indexTemplate struct {
 	PayorID         uuid.UUID `json:"payor_id"`
 }
 
-func ListIndexTemplates(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) ListIndexTemplates(w http.ResponseWriter, r *http.Request) {
 	payorIDs, err := parseUUIDFilter(r, "payor_ids")
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
@@ -39,19 +38,7 @@ func ListIndexTemplates(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := db.NewPostgresFromEnv(r.Context())
-	if err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
-			"error": map[string]string{
-				"code":    "db_not_configured",
-				"message": "set PG_HOST, PG_USER, and PG_PASSWORD to enable this endpoint",
-			},
-		})
-		return
-	}
-	defer conn.Close()
-
-	templates, err := queryIndexTemplates(r.Context(), conn, payorIDs)
+	templates, err := queryIndexTemplates(r.Context(), h.DB, payorIDs)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{
 			"error": map[string]string{

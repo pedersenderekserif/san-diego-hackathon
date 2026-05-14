@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/pedersenderekserif/san-diego-hackathon/api/internal/db"
 )
 
 type form5500 struct {
@@ -29,7 +28,7 @@ type form5500 struct {
 	DateReceived          string `json:"date_received"`
 }
 
-func ListForm5500(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) ListForm5500(w http.ResponseWriter, r *http.Request) {
 	eins := parseStringFilter(r, "eins")
 	sponsorNames := parseStringFilter(r, "sponsor_names")
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
@@ -44,19 +43,7 @@ func ListForm5500(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := db.NewPostgresFromEnv(r.Context())
-	if err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
-			"error": map[string]string{
-				"code":    "db_not_configured",
-				"message": "set PG_HOST, PG_USER, and PG_PASSWORD to enable this endpoint",
-			},
-		})
-		return
-	}
-	defer conn.Close()
-
-	filings, err := queryForm5500(r.Context(), conn, eins, sponsorNames, q)
+	filings, err := queryForm5500(r.Context(), h.DB, eins, sponsorNames, q)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{
 			"error": map[string]string{

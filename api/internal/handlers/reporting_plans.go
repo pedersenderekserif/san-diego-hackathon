@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/pedersenderekserif/san-diego-hackathon/api/internal/db"
 )
 
 type reportingPlan struct {
@@ -26,7 +25,7 @@ type reportingPlan struct {
 	PlanSponsorName string    `json:"plan_sponsor_name"`
 }
 
-func ListReportingPlans(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) ListReportingPlans(w http.ResponseWriter, r *http.Request) {
 	ingestorIDs, err := parseUUIDFilter(r, "ingestor_ids")
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
@@ -51,19 +50,7 @@ func ListReportingPlans(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := db.NewPostgresFromEnv(r.Context())
-	if err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
-			"error": map[string]string{
-				"code":    "db_not_configured",
-				"message": "set PG_HOST, PG_USER, and PG_PASSWORD to enable this endpoint",
-			},
-		})
-		return
-	}
-	defer conn.Close()
-
-	plans, err := queryReportingPlans(r.Context(), conn, ingestorIDs, planIDTypes, planMarketTypes)
+	plans, err := queryReportingPlans(r.Context(), h.DB, ingestorIDs, planIDTypes, planMarketTypes)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{
 			"error": map[string]string{
