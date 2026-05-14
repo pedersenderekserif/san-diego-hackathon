@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 // normalizeEIN strips dashes and returns the 9-digit plain EIN if s is a valid
@@ -56,19 +58,19 @@ type form5500 struct {
 func (h *Handler) ListForm5500(w http.ResponseWriter, r *http.Request) {
 	eins := parseStringFilter(r, "eins")
 	sponsorNames := parseStringFilter(r, "sponsor_names")
-	parsedPayorIDs, err := parseUUIDFilter(r, "payor_ids")
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{
-			"error": map[string]string{
-				"code":    "invalid_filters",
-				"message": err.Error(),
-			},
-		})
-		return
-	}
-	payorIDs := make([]string, 0, len(parsedPayorIDs))
-	for _, payorID := range parsedPayorIDs {
-		payorIDs = append(payorIDs, payorID.String())
+	var payorIDs []string
+	if rawPayorID := strings.TrimSpace(r.URL.Query().Get("payor_id")); rawPayorID != "" {
+		parsed, err := uuid.Parse(rawPayorID)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"error": map[string]string{
+					"code":    "invalid_filters",
+					"message": "payor_id must be a valid UUID",
+				},
+			})
+			return
+		}
+		payorIDs = []string{parsed.String()}
 	}
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 
@@ -88,7 +90,7 @@ func (h *Handler) ListForm5500(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"error": map[string]string{
 				"code":    "missing_filters",
-				"message": "at least one of eins, sponsor_names, q, or payor_ids is required",
+				"message": "at least one of eins, sponsor_names, q, or payor_id is required",
 			},
 		})
 		return

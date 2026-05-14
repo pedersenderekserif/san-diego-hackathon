@@ -402,7 +402,7 @@ async function search(q) {
     const params = new URLSearchParams()
     params.set('q', q)
     if (selectedPayorId.value) {
-      params.append('payor_ids', selectedPayorId.value)
+      params.append('payor_id', selectedPayorId.value)
     }
 
     const res = await fetch(`/api/v1/form-5500?${params.toString()}`)
