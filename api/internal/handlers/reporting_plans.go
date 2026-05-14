@@ -116,7 +116,7 @@ func queryReportingPlans(ctx context.Context, db *sql.DB, ingestorIDs []uuid.UUI
 	einFilter := ""
 	if len(eins) > 0 {
 		einPlaceholders, next := placeholders(nextPlaceholder, len(eins))
-		einFilter = fmt.Sprintf("\n\tand rp.plan_id_type = 'EIN'\n\tand rp.plan_id IN (%s)", einPlaceholders)
+		einFilter = fmt.Sprintf("\n\tand UPPER(rp.plan_id_type) = 'EIN'\n\tand rp.plan_id IN (%s)", einPlaceholders)
 		nextPlaceholder = next
 	}
 	_ = nextPlaceholder
