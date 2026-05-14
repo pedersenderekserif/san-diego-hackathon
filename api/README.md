@@ -38,8 +38,12 @@ curl "http://localhost:8080/v1/reporting-plans?ingestor_ids=123e4567-e89b-12d3-a
 
 Set database connection details before calling this route:
 
-- `DB_DRIVER` (for example, `mysql`)
-- `DB_DSN` (driver-specific DSN)
+- `PG_HOST` (required)
+- `PG_USER` (required)
+- `PG_PASSWORD` (required)
+- `PG_PORT` (optional, defaults to `5432`)
+- `PG_DATABASE` (optional, defaults to `postgres`)
+- `PG_SSLMODE` (optional, defaults to `disable`)
 
 ## Make Targets
 

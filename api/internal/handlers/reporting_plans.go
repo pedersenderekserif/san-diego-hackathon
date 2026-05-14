@@ -6,10 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/pedersenderekserif/san-diego-hackathon/api/internal/db"
 )
 
 type reportingPlan struct {
@@ -51,31 +51,19 @@ func ListReportingPlans(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dbDriver := os.Getenv("DB_DRIVER")
-	dbDSN := os.Getenv("DB_DSN")
-	if dbDriver == "" || dbDSN == "" {
+	conn, err := db.NewPostgresFromEnv(r.Context())
+	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
 			"error": map[string]string{
 				"code":    "db_not_configured",
-				"message": "set DB_DRIVER and DB_DSN to enable this endpoint",
+				"message": "set PG_HOST, PG_USER, and PG_PASSWORD to enable this endpoint",
 			},
 		})
 		return
 	}
+	defer conn.Close()
 
-	db, err := sql.Open(dbDriver, dbDSN)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{
-			"error": map[string]string{
-				"code":    "db_open_failed",
-				"message": "failed to initialize database connection",
-			},
-		})
-		return
-	}
-	defer db.Close()
-
-	plans, err := queryReportingPlans(r.Context(), db, ingestorIDs, planIDTypes, planMarketTypes)
+	plans, err := queryReportingPlans(r.Context(), conn, ingestorIDs, planIDTypes, planMarketTypes)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{
 			"error": map[string]string{
@@ -99,9 +87,10 @@ func queryReportingPlans(ctx context.Context, db *sql.DB, ingestorIDs []uuid.UUI
 		return nil, errors.New("all filters must be provided")
 	}
 
-	ingestorPlaceholders := placeholders(len(ingestorIDs))
-	planIDTypePlaceholders := placeholders(len(planIDTypes))
-	planMarketTypePlaceholders := placeholders(len(planMarketTypes))
+	nextPlaceholder := 1
+	ingestorPlaceholders, nextPlaceholder := placeholders(nextPlaceholder, len(ingestorIDs))
+	planIDTypePlaceholders, nextPlaceholder := placeholders(nextPlaceholder, len(planIDTypes))
+	planMarketTypePlaceholders, _ := placeholders(nextPlaceholder, len(planMarketTypes))
 
 	query := fmt.Sprintf(`
 select
@@ -212,15 +201,15 @@ func parseStringFilter(r *http.Request, key string) []string {
 	return values
 }
 
-func placeholders(n int) string {
+func placeholders(start, n int) (string, int) {
 	if n <= 0 {
-		return ""
+		return "", start
 	}
 
 	parts := make([]string, n)
 	for i := range parts {
-		parts[i] = "?"
+		parts[i] = fmt.Sprintf("$%d", start+i)
 	}
 
-	return strings.Join(parts, ",")
+	return strings.Join(parts, ","), start + n
 }
