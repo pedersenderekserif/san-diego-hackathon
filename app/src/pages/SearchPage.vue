@@ -387,7 +387,8 @@ async function selectEmployer(employer) {
 
   try {
     const filters = await ensureReportingPlanFilters()
-    const params = reportingPlanParams(employer.ein, filters, selectedPayorId.value)
+    const effectivePayorId = selectedPayorId.value !== 'select_payor' ? selectedPayorId.value : null
+    const params = reportingPlanParams(employer.ein, filters, effectivePayorId)
     const res = await fetch(`/api/v1/reporting-plans?${params.toString()}`)
     const json = await res.json()
     if (!res.ok) {
@@ -407,7 +408,7 @@ async function search(q) {
   try {
     const params = new URLSearchParams()
     params.set('q', q)
-    if (selectedPayorId.value) {
+    if (selectedPayorId.value && selectedPayorId.value !== 'select_payor') {
       params.append('payor_id', selectedPayorId.value)
     }
 
