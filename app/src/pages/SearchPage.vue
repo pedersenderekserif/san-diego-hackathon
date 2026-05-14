@@ -199,6 +199,8 @@ const payorLoading = ref(false)
 const payorError = ref(null)
 const selectedPayorId = ref('')
 const aetnaEINs = ref(new Set())
+const bcbsilEINs = ref(new Set())
+const bcbstxEINs = ref(new Set())
 
 const filters = [
   { label: 'All Plans', value: 'all' },
@@ -209,7 +211,10 @@ const filters = [
 
 function mapFiling(f) {
   const plainEIN = f.spons_dfe_ein ? f.spons_dfe_ein.replace(/-/g, '') : ''
-  const networks = aetnaEINs.value.has(plainEIN) ? ['Aetna'] : []
+  const networks = []
+  if (aetnaEINs.value.has(plainEIN)) networks.push('Aetna')
+  if (bcbsilEINs.value.has(plainEIN)) networks.push('BCBS IL')
+  if (bcbstxEINs.value.has(plainEIN)) networks.push('BCBS TX')
   return {
     ein: f.spons_dfe_ein,
     name: f.sponsor_dfe_name || f.spons_dfe_dba_name,
@@ -238,6 +243,8 @@ let debounceTimer = null
 onMounted(() => {
   ensurePayorOptions()
   loadAetnaEINs()
+  loadBCBSILEINs()
+  loadBCBSTXEINs()
 })
 
 async function loadAetnaEINs() {
@@ -253,6 +260,38 @@ async function loadAetnaEINs() {
       }
     }
     aetnaEINs.value = einSet
+  } catch {
+    // non-critical: silently ignore
+  }
+}
+
+async function loadBCBSILEINs() {
+  try {
+    const res = await fetch('/api/v1/bcbsil-mrf/entries')
+    if (!res.ok) return
+    const json = await res.json()
+    const entries = json?.data ?? []
+    const einSet = new Set()
+    for (const entry of entries) {
+      if (entry.ein) einSet.add(entry.ein.replace(/-/g, ''))
+    }
+    bcbsilEINs.value = einSet
+  } catch {
+    // non-critical: silently ignore
+  }
+}
+
+async function loadBCBSTXEINs() {
+  try {
+    const res = await fetch('/api/v1/bcbstx-mrf/entries')
+    if (!res.ok) return
+    const json = await res.json()
+    const entries = json?.data ?? []
+    const einSet = new Set()
+    for (const entry of entries) {
+      if (entry.ein) einSet.add(entry.ein.replace(/-/g, ''))
+    }
+    bcbstxEINs.value = einSet
   } catch {
     // non-critical: silently ignore
   }
