@@ -1,4 +1,6 @@
 "index_template_id","payor_name","payor_id"
+"ef2cfda9-fc75-4fe9-87bd-f80ef381bb9e","Blue Cross and Blue Shield of Illinois","24b8e840-2a4e-46ee-b52c-82b21bb60427"
+"ac6243e8-1cac-4e5e-b1e6-43039a3577d4","Blue Shield of California","554707f5-ebf2-45dd-b7a1-2f8fd4d83250"
 "ee34483f-6a01-41f7-84d3-4ffce1a02f30","Cigna Corporation","5c7844b1-f8ed-468c-9750-8faa952aa9be"
 "4a1f2e27-4ce9-4bbb-a07d-f9d97aebd51f","Optum","6898d081-93d2-451f-81e3-d9dd09f90304"
 "fd87c071-3f79-4465-b9db-bfcb5346a796","UnitedHealthcare","7218e478-2e12-4993-a492-fd1c2358b24e"
@@ -51,3 +53,6 @@
 "7b55e5fb-564b-4056-a343-425ff7b4a11c","Aetna","9b29c0e6-21b4-41b0-bd13-a7d8a4342d4c"
 "0d211fb6-fe75-42e4-9878-6ab486cf5096","Aetna","9b29c0e6-21b4-41b0-bd13-a7d8a4342d4c"
 "21c8e38d-e0b6-423e-b100-beaf234f32a4","Aetna","9b29c0e6-21b4-41b0-bd13-a7d8a4342d4c"
+"60f9dee0-62e6-4b8a-a692-e43ae5cc0437","Anthem","9c279602-ab4f-42aa-9329-98756fea34c6"
+"fd9c6a39-378c-4070-b1d2-fa58a57c8b86","Blue Cross and Blue Shield of Texas","c467dfff-cb79-4f3b-b407-6d3f3e9f9bb6"
+"76780893-5662-4f8c-8dbe-83065841ebb4","Blue Cross and Blue Shield of Texas","c467dfff-cb79-4f3b-b407-6d3f3e9f9bb6"

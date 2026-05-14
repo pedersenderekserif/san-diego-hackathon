@@ -27,6 +27,27 @@
       </div>
     </div>
 
+    <div class="mb-4">
+      <label for="payor-filter" class="block text-sm font-medium text-slate-300 mb-2">Payor Network</label>
+      <select
+        id="payor-filter"
+        v-model="selectedPayorId"
+        @change="onPayorChange"
+        class="w-full bg-slate-900 border border-slate-700 focus:border-brand-500 focus:ring-1 focus:ring-brand-500 rounded-xl px-4 py-3 text-white outline-none transition-colors"
+      >
+        <option value="">All payors</option>
+        <option
+          v-for="payor in payorOptions"
+          :key="payor.payor_id"
+          :value="payor.payor_id"
+        >
+          {{ payor.payor_name }}
+        </option>
+      </select>
+      <p v-if="payorLoading" class="mt-2 text-xs text-slate-500">Loading payors...</p>
+      <p v-else-if="payorError" class="mt-2 text-xs text-red-400">{{ payorError }}</p>
+    </div>
+
     <!-- Filter pills -->
     <div class="flex flex-wrap gap-2 mb-8">
       <button
@@ -51,39 +72,93 @@
 
     <!-- Results -->
     <div v-if="results.length > 0" class="space-y-3">
-      <div
-        v-for="employer in results"
-        :key="employer.ein"
-        class="bg-brand-950/40 border border-brand-900/20 hover:border-brand-800/40 rounded-xl p-5 transition-colors cursor-pointer group"
-      >
-        <div class="flex items-start justify-between gap-4">
-          <div class="min-w-0">
-            <h3 class="text-white font-semibold truncate group-hover:text-brand-400 transition-colors">{{ employer.name }}</h3>
-            <div class="flex items-center gap-3 mt-1 text-sm text-slate-500">
-              <span>EIN: {{ employer.ein }}</span>
-              <span>·</span>
-              <span>{{ employer.state }}</span>
-              <span v-if="employer.industry">·</span>
-              <span v-if="employer.industry">{{ employer.industry }}</span>
+      <template v-for="employer in results" :key="`${employer.ein}-${employer.name}`">
+        <!-- Employer card -->
+        <div
+          @click="selectEmployer(employer)"
+          @keydown="onEmployerKeydown($event, employer)"
+          role="button"
+          tabindex="0"
+          :class="[
+            'bg-slate-900 border rounded-xl p-5 transition-colors cursor-pointer group',
+            selectedEmployer?.ein === employer.ein
+              ? 'border-brand-500 rounded-b-none'
+              : 'border-slate-800 hover:border-slate-600'
+          ]"
+        >
+          <div class="flex items-start justify-between gap-4">
+            <div class="min-w-0">
+              <h3 class="text-white font-semibold truncate group-hover:text-brand-400 transition-colors">{{ employer.name }}</h3>
+              <div class="flex items-center gap-3 mt-1 text-sm text-slate-500">
+                <span>EIN: {{ employer.ein }}</span>
+                <span>·</span>
+                <span>{{ employer.state }}</span>
+                <span v-if="employer.industry">·</span>
+                <span v-if="employer.industry">{{ employer.industry }}</span>
+              </div>
+            </div>
+            <div class="flex flex-col items-end gap-1.5 shrink-0">
+              <span
+                v-for="network in employer.networks"
+                :key="network"
+                class="inline-block bg-brand-500/10 text-brand-400 text-xs font-medium px-2.5 py-0.5 rounded-full border border-brand-500/20"
+              >
+                {{ network }}
+              </span>
+              <!-- Expand/collapse chevron -->
+              <svg
+                :class="['h-4 w-4 text-slate-500 transition-transform mt-1', selectedEmployer?.ein === employer.ein ? 'rotate-180 text-brand-400' : '']"
+                xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+              >
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+              </svg>
             </div>
           </div>
-          <div class="flex flex-col items-end gap-1.5 shrink-0">
-            <span
-              v-for="network in employer.networks"
-              :key="network"
-              class="inline-block bg-brand-500/10 text-brand-400 text-xs font-medium px-2.5 py-0.5 rounded-full border border-brand-500/20"
-            >
-              {{ network }}
-            </span>
+          <div class="mt-3 flex items-center gap-4 text-xs text-slate-600">
+            <span>{{ employer.planType }} plan</span>
+            <span v-if="employer.employees">· {{ employer.employees.toLocaleString() }} employees</span>
+            <span v-if="employer.hasPriceData" class="text-emerald-500">✓ Price data available</span>
+            <span v-else class="text-amber-500">⚠ No price data</span>
           </div>
         </div>
-        <div class="mt-3 flex items-center gap-4 text-xs text-slate-600">
-          <span>{{ employer.planType }} plan</span>
-          <span v-if="employer.employees">· {{ employer.employees.toLocaleString() }} employees</span>
-          <span v-if="employer.hasPriceData" class="text-emerald-500">✓ Price data available</span>
-          <span v-else class="text-amber-500">⚠ No price data</span>
+
+        <!-- Expansion row: reporting plans inline below selected employer -->
+        <div
+          v-if="selectedEmployer?.ein === employer.ein"
+          class="bg-slate-950 border border-brand-500 border-t-0 rounded-b-xl px-5 py-4 -mt-3"
+        >
+          <h2 class="text-sm font-semibold text-brand-400 mb-3">Reporting Plans</h2>
+
+          <div v-if="reportingPlansLoading" class="text-slate-400 text-sm">Loading reporting plans…</div>
+
+          <div v-else-if="reportingPlansError" class="bg-red-500/10 border border-red-500/30 text-red-400 rounded-xl px-4 py-3 text-sm">
+            {{ reportingPlansError }}
+          </div>
+
+          <div v-else-if="reportingPlans.length === 0" class="text-slate-500 text-sm">
+            No reporting plans found for this employer.
+          </div>
+
+          <div v-else class="space-y-2">
+            <div
+              v-for="plan in reportingPlans"
+              :key="plan.id"
+              class="bg-slate-900 border border-slate-800 rounded-xl px-4 py-3"
+            >
+              <div class="flex items-center justify-between gap-3">
+                <h3 class="text-sm font-medium text-white truncate">{{ plan.plan_name || 'Unnamed Plan' }}</h3>
+                <span class="text-xs text-slate-400 shrink-0">{{ plan.plan_market_type }}</span>
+              </div>
+              <div class="mt-1 text-xs text-slate-500">
+                <span>ID: {{ plan.plan_id }}</span>
+                <span> · </span>
+                <span>Type: {{ plan.plan_id_type }}</span>
+                <span v-if="plan.issuer_name"> · Issuer: {{ plan.issuer_name }}</span>
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
+      </template>
     </div>
 
     <!-- Empty state (after search) -->
@@ -100,13 +175,13 @@
       <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mx-auto mb-4 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
       </svg>
-      <p class="text-sm">Type an employer name or EIN above to get started</p>
+      <p class="text-sm">Select a payor network or type an employer name / EIN above to get started</p>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 
 const query = ref('')
 const loading = ref(false)
@@ -114,6 +189,15 @@ const hasSearched = ref(false)
 const activeFilter = ref('all')
 const results = ref([])
 const error = ref(null)
+const selectedEmployer = ref(null)
+const reportingPlans = ref([])
+const reportingPlansLoading = ref(false)
+const reportingPlansError = ref(null)
+const reportingPlanFilters = ref(null)
+const payorOptions = ref([])
+const payorLoading = ref(false)
+const payorError = ref(null)
+const selectedPayorId = ref('')
 
 const filters = [
   { label: 'All Plans', value: 'all' },
@@ -135,14 +219,37 @@ function mapFiling(f) {
   }
 }
 
+function mapReportingPlan(plan) {
+  return {
+    id: plan.id,
+    plan_id: plan.plan_id,
+    plan_name: plan.plan_name,
+    plan_id_type: plan.plan_id_type,
+    plan_market_type: plan.plan_market_type,
+    issuer_name: plan.issuer_name
+  }
+}
+
 let debounceTimer = null
+
+onMounted(() => {
+  ensurePayorOptions()
+})
 
 function onInput() {
   clearTimeout(debounceTimer)
   error.value = null
   if (!query.value.trim()) {
-    results.value = []
-    hasSearched.value = false
+    selectedEmployer.value = null
+    reportingPlans.value = []
+    reportingPlansError.value = null
+    if (selectedPayorId.value) {
+      loading.value = true
+      debounceTimer = setTimeout(() => search(''), 350)
+    } else {
+      results.value = []
+      hasSearched.value = false
+    }
     return
   }
   loading.value = true
@@ -151,15 +258,141 @@ function onInput() {
   }, 350)
 }
 
+async function ensureReportingPlanFilters() {
+  if (reportingPlanFilters.value) {
+    return reportingPlanFilters.value
+  }
+
+  const res = await fetch('/api/v1/reporting-plans/filters')
+  const json = await res.json()
+  if (!res.ok) {
+    throw new Error(json?.error?.message ?? 'Failed to load reporting plan filters')
+  }
+
+  reportingPlanFilters.value = json?.data ?? null
+  return reportingPlanFilters.value
+}
+
+async function ensurePayorOptions() {
+  if (payorOptions.value.length > 0) {
+    return payorOptions.value
+  }
+
+  payorLoading.value = true
+  payorError.value = null
+
+  try {
+    const res = await fetch('/api/v1/index-templates/payors')
+    const json = await res.json()
+    if (!res.ok) {
+      throw new Error(json?.error?.message ?? 'Failed to load payors')
+    }
+
+    payorOptions.value = json?.data ?? []
+    return payorOptions.value
+  } catch (fetchError) {
+    payorError.value = fetchError?.message || 'Failed to load payors'
+    return []
+  } finally {
+    payorLoading.value = false
+  }
+}
+
+function reportingPlanParams(ein, filters, selectedPayor) {
+  const params = new URLSearchParams()
+  params.set('eins', ein)
+
+  if (selectedPayor) {
+    params.append('ingestor_ids', selectedPayor)
+  } else {
+    for (const ingestorID of filters?.ingestor_ids ?? []) {
+      params.append('ingestor_ids', ingestorID)
+    }
+  }
+  for (const planIDType of filters?.plan_id_types ?? []) {
+    params.append('plan_id_types', planIDType)
+  }
+  for (const planMarketType of filters?.plan_market_types ?? []) {
+    params.append('plan_market_types', planMarketType)
+  }
+
+  return params
+}
+
+function onPayorChange() {
+  selectedEmployer.value = null
+  reportingPlans.value = []
+  reportingPlansError.value = null
+  error.value = null
+
+  const trimmed = query.value.trim()
+  if (!trimmed && !selectedPayorId.value) {
+    results.value = []
+    hasSearched.value = false
+    return
+  }
+
+  loading.value = true
+  search(trimmed)
+}
+
+function onEmployerKeydown(event, employer) {
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault()
+    selectEmployer(employer)
+  }
+}
+
+async function selectEmployer(employer) {
+  // Toggle: clicking the same employer again collapses the expansion row
+  if (selectedEmployer.value?.ein === employer.ein) {
+    selectedEmployer.value = null
+    reportingPlans.value = []
+    reportingPlansError.value = null
+    return
+  }
+
+  selectedEmployer.value = employer
+  reportingPlansError.value = null
+  reportingPlans.value = []
+  reportingPlansLoading.value = true
+
+  try {
+    const filters = await ensureReportingPlanFilters()
+    const params = reportingPlanParams(employer.ein, filters, selectedPayorId.value)
+    const res = await fetch(`/api/v1/reporting-plans?${params.toString()}`)
+    const json = await res.json()
+    if (!res.ok) {
+      reportingPlansError.value = json?.error?.message ?? 'Failed to fetch reporting plans'
+      return
+    }
+
+    reportingPlans.value = (json?.data ?? []).map(mapReportingPlan)
+  } catch (fetchError) {
+    reportingPlansError.value = fetchError?.message || 'Failed to fetch reporting plans'
+  } finally {
+    reportingPlansLoading.value = false
+  }
+}
+
 async function search(q) {
   try {
-    const res = await fetch(`/api/v1/form-5500?q=${encodeURIComponent(q)}`)
+    const params = new URLSearchParams()
+    params.set('q', q)
+    if (selectedPayorId.value) {
+      params.append('payor_ids', selectedPayorId.value)
+    }
+
+    const res = await fetch(`/api/v1/form-5500?${params.toString()}`)
     const json = await res.json()
     if (!res.ok) {
       error.value = json?.error?.message ?? 'An error occurred'
       results.value = []
     } else {
       results.value = (json.data ?? []).map(mapFiling)
+      selectedEmployer.value = null
+      reportingPlans.value = []
+      reportingPlansError.value = null
     }
     hasSearched.value = true
   } catch (e) {

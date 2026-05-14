@@ -6,9 +6,33 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-
-	"github.com/pedersenderekserif/san-diego-hackathon/api/internal/db"
 )
+
+// normalizeEIN strips dashes and returns the 9-digit plain EIN if s is a valid
+// EIN (either "XXXXXXXXX" or "XX-XXXXXXX"), otherwise returns "".
+func normalizeEIN(s string) string {
+	stripped := strings.ReplaceAll(strings.TrimSpace(s), "-", "")
+	if len(stripped) != 9 {
+		return ""
+	}
+	for _, c := range stripped {
+		if c < '0' || c > '9' {
+			return ""
+		}
+	}
+	return stripped
+}
+
+// einVariants returns both the plain ("XXXXXXXXX") and dashed ("XX-XXXXXXX")
+// forms of an EIN. Returns ("", "") if s does not look like a valid EIN.
+func einVariants(s string) (plain, dashed string) {
+	plain = normalizeEIN(s)
+	if plain == "" {
+		return "", ""
+	}
+	dashed = plain[:2] + "-" + plain[2:]
+	return plain, dashed
+}
 
 type form5500 struct {
 	AckID                 string `json:"ack_id"`
@@ -29,34 +53,48 @@ type form5500 struct {
 	DateReceived          string `json:"date_received"`
 }
 
-func ListForm5500(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) ListForm5500(w http.ResponseWriter, r *http.Request) {
 	eins := parseStringFilter(r, "eins")
 	sponsorNames := parseStringFilter(r, "sponsor_names")
+	parsedPayorIDs, err := parseUUIDFilter(r, "payor_ids")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"error": map[string]string{
+				"code":    "invalid_filters",
+				"message": err.Error(),
+			},
+		})
+		return
+	}
+	payorIDs := make([]string, 0, len(parsedPayorIDs))
+	for _, payorID := range parsedPayorIDs {
+		payorIDs = append(payorIDs, payorID.String())
+	}
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 
-	if len(eins) == 0 && len(sponsorNames) == 0 && q == "" {
+	// Expand each EIN to both plain and dashed forms so either format matches.
+	normalizedEINs := make([]string, 0, len(eins)*2)
+	for _, ein := range eins {
+		plain, dashed := einVariants(ein)
+		if plain == "" {
+			normalizedEINs = append(normalizedEINs, ein) // pass through non-EIN values unchanged
+		} else {
+			normalizedEINs = append(normalizedEINs, plain, dashed)
+		}
+	}
+	eins = normalizedEINs
+
+	if len(eins) == 0 && len(sponsorNames) == 0 && q == "" && len(payorIDs) == 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"error": map[string]string{
 				"code":    "missing_filters",
-				"message": "at least one of eins, sponsor_names, or q is required",
+				"message": "at least one of eins, sponsor_names, q, or payor_ids is required",
 			},
 		})
 		return
 	}
 
-	conn, err := db.NewPostgresFromEnv(r.Context())
-	if err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
-			"error": map[string]string{
-				"code":    "db_not_configured",
-				"message": "set PG_HOST, PG_USER, and PG_PASSWORD to enable this endpoint",
-			},
-		})
-		return
-	}
-	defer conn.Close()
-
-	filings, err := queryForm5500(r.Context(), conn, eins, sponsorNames, q)
+	filings, err := queryForm5500(r.Context(), h.DB, eins, sponsorNames, q, payorIDs)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{
 			"error": map[string]string{
@@ -75,15 +113,16 @@ func ListForm5500(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func queryForm5500(ctx context.Context, conn *sql.DB, eins, sponsorNames []string, q string) ([]form5500, error) {
+func queryForm5500(ctx context.Context, conn *sql.DB, eins, sponsorNames []string, q string, payorIDs []string) ([]form5500, error) {
 	args := make([]any, 0, len(eins)+len(sponsorNames)+2)
-	conditions := make([]string, 0, 3)
+	searchConditions := make([]string, 0, 3)
+	scopeConditions := make([]string, 0, 1)
 
 	nextPlaceholder := 1
 
 	if len(eins) > 0 {
 		einPlaceholders, next := placeholders(nextPlaceholder, len(eins))
-		conditions = append(conditions, fmt.Sprintf("spons_dfe_ein IN (%s)", einPlaceholders))
+		searchConditions = append(searchConditions, fmt.Sprintf("spons_dfe_ein IN (%s)", einPlaceholders))
 		nextPlaceholder = next
 		for _, ein := range eins {
 			args = append(args, ein)
@@ -92,7 +131,7 @@ func queryForm5500(ctx context.Context, conn *sql.DB, eins, sponsorNames []strin
 
 	if len(sponsorNames) > 0 {
 		namePlaceholders, next := placeholders(nextPlaceholder, len(sponsorNames))
-		conditions = append(conditions, fmt.Sprintf("sponsor_dfe_name IN (%s)", namePlaceholders))
+		searchConditions = append(searchConditions, fmt.Sprintf("sponsor_dfe_name IN (%s)", namePlaceholders))
 		nextPlaceholder = next
 		for _, name := range sponsorNames {
 			args = append(args, name)
@@ -100,12 +139,55 @@ func queryForm5500(ctx context.Context, conn *sql.DB, eins, sponsorNames []strin
 	}
 
 	if q != "" {
-		like := "%" + q + "%"
-		conditions = append(conditions, fmt.Sprintf(
-			"(sponsor_dfe_name ILIKE $%d OR spons_dfe_ein ILIKE $%d)",
-			nextPlaceholder, nextPlaceholder+1,
-		))
-		args = append(args, like, like)
+		plain, dashed := einVariants(q)
+		if plain != "" {
+			// q looks like an EIN — match either stored format exactly.
+			einPlaceholders, next := placeholders(nextPlaceholder, 2)
+			searchConditions = append(searchConditions, fmt.Sprintf("spons_dfe_ein IN (%s)", einPlaceholders))
+			args = append(args, plain, dashed)
+			nextPlaceholder = next
+		} else {
+			like := "%" + q + "%"
+			searchConditions = append(searchConditions, fmt.Sprintf(
+				"(sponsor_dfe_name ILIKE $%d OR spons_dfe_ein ILIKE $%d)",
+				nextPlaceholder, nextPlaceholder+1,
+			))
+			args = append(args, like, like)
+			nextPlaceholder += 2
+		}
+	}
+
+	if len(payorIDs) > 0 {
+		payorPlaceholderParts := make([]string, len(payorIDs))
+		for i := range payorIDs {
+			payorPlaceholderParts[i] = fmt.Sprintf("$%d::uuid", nextPlaceholder+i)
+		}
+		payorPlaceholders := strings.Join(payorPlaceholderParts, ",")
+		nextPlaceholder += len(payorIDs)
+		scopeConditions = append(scopeConditions, fmt.Sprintf(`
+			spons_dfe_ein <> ''
+			and exists (
+				select 1
+				from reporting_plans rp
+				join indexes i on i.id = rp.index_id
+				where i.deleted_at is null
+					and i.archived_at is null
+					and i.ingestor_id in (%s)
+					and UPPER(rp.plan_id_type) = 'EIN'
+					and replace(rp.plan_id, '-', '') = replace(form_5500.spons_dfe_ein, '-', '')
+			)
+		`, payorPlaceholders))
+		for _, payorID := range payorIDs {
+			args = append(args, payorID)
+		}
+	}
+
+	whereParts := make([]string, 0, 2)
+	if len(searchConditions) > 0 {
+		whereParts = append(whereParts, "("+strings.Join(searchConditions, " or ")+")")
+	}
+	if len(scopeConditions) > 0 {
+		whereParts = append(whereParts, strings.Join(scopeConditions, " and "))
 	}
 
 	query := fmt.Sprintf(`
@@ -128,7 +210,7 @@ select
 	, coalesce(date_received, '') as date_received
 from form_5500
 where %s
-`, strings.Join(conditions, " or "))
+`, strings.Join(whereParts, " and "))
 
 	rows, err := conn.QueryContext(ctx, query, args...)
 	if err != nil {

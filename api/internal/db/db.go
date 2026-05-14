@@ -3,7 +3,6 @@ package db
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -13,21 +12,26 @@ import (
 
 func NewPostgresFromEnv(ctx context.Context) (*sql.DB, error) {
 	host := os.Getenv("PG_HOST")
+	if host == "" {
+		host = "localhost"
+	}
 	user := os.Getenv("PG_USER")
+	if user == "" {
+		user = "hackathon"
+	}
 	password := os.Getenv("PG_PASSWORD")
-
-	if host == "" || user == "" || password == "" {
-		return nil, errors.New("PG_HOST, PG_USER, and PG_PASSWORD are required")
+	if password == "" {
+		password = "hackathon"
 	}
 
 	port := os.Getenv("PG_PORT")
 	if port == "" {
-		port = "5432"
+		port = "5477"
 	}
 
 	database := os.Getenv("PG_DATABASE")
 	if database == "" {
-		database = "postgres"
+		database = "hackathon"
 	}
 
 	sslMode := os.Getenv("PG_SSLMODE")

@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
 
+	"github.com/pedersenderekserif/san-diego-hackathon/api/internal/db"
 	"github.com/pedersenderekserif/san-diego-hackathon/api/internal/router"
 )
 
@@ -14,9 +16,15 @@ func main() {
 		port = "8080"
 	}
 
+	conn, err := db.NewPostgresFromEnv(context.Background())
+	if err != nil {
+		log.Fatalf("failed to connect to database: %v", err)
+	}
+	defer conn.Close()
+
 	srv := &http.Server{
 		Addr:    ":" + port,
-		Handler: router.New(),
+		Handler: router.New(conn),
 	}
 
 	log.Printf("api server listening on :%s", port)

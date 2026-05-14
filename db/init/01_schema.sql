@@ -30,6 +30,7 @@ CREATE TABLE reporting_plans (
 
 CREATE INDEX idx_reporting_plans_index_id        ON reporting_plans (index_id);
 CREATE INDEX idx_reporting_plans_plan_id_type    ON reporting_plans (plan_id_type);
+CREATE INDEX idx_reporting_plans_plan_id         ON reporting_plans (plan_id);
 CREATE INDEX idx_reporting_plans_plan_market_type ON reporting_plans (plan_market_type);
 CREATE INDEX idx_indexes_ingestor_id             ON indexes (ingestor_id);
 
