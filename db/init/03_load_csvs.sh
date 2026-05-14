@@ -14,7 +14,7 @@ unzip -p /datasets/reporting_plans.csv.zip reporting_plans.csv > /tmp/reporting_
 
 echo "  Loading reporting_plans..."
 psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
-    -c "\COPY reporting_plans FROM '/tmp/reporting_plans.csv' WITH CSV HEADER"
+    -c "\COPY reporting_plans FROM '/tmp/reporting_plans.csv' WITH CSV DELIMITER E'\t' QUOTE E'\b' ESCAPE E'\\\\' HEADER"
 
 rm -f /tmp/reporting_plans.csv
 
