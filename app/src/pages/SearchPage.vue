@@ -51,83 +51,93 @@
 
     <!-- Results -->
     <div v-if="results.length > 0" class="space-y-3">
-      <div
-        v-for="employer in results"
-        :key="`${employer.ein}-${employer.name}`"
-        @click="selectEmployer(employer)"
-        @keydown="onEmployerKeydown($event, employer)"
-        role="button"
-        tabindex="0"
-        :class="[
-          'bg-slate-900 border rounded-xl p-5 transition-colors cursor-pointer group',
-          selectedEmployer?.ein === employer.ein
-            ? 'border-brand-500'
-            : 'border-slate-800 hover:border-slate-600'
-        ]"
-      >
-        <div class="flex items-start justify-between gap-4">
-          <div class="min-w-0">
-            <h3 class="text-white font-semibold truncate group-hover:text-brand-400 transition-colors">{{ employer.name }}</h3>
-            <div class="flex items-center gap-3 mt-1 text-sm text-slate-500">
-              <span>EIN: {{ employer.ein }}</span>
-              <span>·</span>
-              <span>{{ employer.state }}</span>
-              <span v-if="employer.industry">·</span>
-              <span v-if="employer.industry">{{ employer.industry }}</span>
+      <template v-for="employer in results" :key="`${employer.ein}-${employer.name}`">
+        <!-- Employer card -->
+        <div
+          @click="selectEmployer(employer)"
+          @keydown="onEmployerKeydown($event, employer)"
+          role="button"
+          tabindex="0"
+          :class="[
+            'bg-slate-900 border rounded-xl p-5 transition-colors cursor-pointer group',
+            selectedEmployer?.ein === employer.ein
+              ? 'border-brand-500 rounded-b-none'
+              : 'border-slate-800 hover:border-slate-600'
+          ]"
+        >
+          <div class="flex items-start justify-between gap-4">
+            <div class="min-w-0">
+              <h3 class="text-white font-semibold truncate group-hover:text-brand-400 transition-colors">{{ employer.name }}</h3>
+              <div class="flex items-center gap-3 mt-1 text-sm text-slate-500">
+                <span>EIN: {{ employer.ein }}</span>
+                <span>·</span>
+                <span>{{ employer.state }}</span>
+                <span v-if="employer.industry">·</span>
+                <span v-if="employer.industry">{{ employer.industry }}</span>
+              </div>
+            </div>
+            <div class="flex flex-col items-end gap-1.5 shrink-0">
+              <span
+                v-for="network in employer.networks"
+                :key="network"
+                class="inline-block bg-brand-500/10 text-brand-400 text-xs font-medium px-2.5 py-0.5 rounded-full border border-brand-500/20"
+              >
+                {{ network }}
+              </span>
+              <!-- Expand/collapse chevron -->
+              <svg
+                :class="['h-4 w-4 text-slate-500 transition-transform mt-1', selectedEmployer?.ein === employer.ein ? 'rotate-180 text-brand-400' : '']"
+                xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+              >
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+              </svg>
             </div>
           </div>
-          <div class="flex flex-col items-end gap-1.5 shrink-0">
-            <span
-              v-for="network in employer.networks"
-              :key="network"
-              class="inline-block bg-brand-500/10 text-brand-400 text-xs font-medium px-2.5 py-0.5 rounded-full border border-brand-500/20"
-            >
-              {{ network }}
-            </span>
+          <div class="mt-3 flex items-center gap-4 text-xs text-slate-600">
+            <span>{{ employer.planType }} plan</span>
+            <span v-if="employer.employees">· {{ employer.employees.toLocaleString() }} employees</span>
+            <span v-if="employer.hasPriceData" class="text-emerald-500">✓ Price data available</span>
+            <span v-else class="text-amber-500">⚠ No price data</span>
           </div>
         </div>
-        <div class="mt-3 flex items-center gap-4 text-xs text-slate-600">
-          <span>{{ employer.planType }} plan</span>
-          <span v-if="employer.employees">· {{ employer.employees.toLocaleString() }} employees</span>
-          <span v-if="employer.hasPriceData" class="text-emerald-500">✓ Price data available</span>
-          <span v-else class="text-amber-500">⚠ No price data</span>
-          <span v-if="selectedEmployer?.ein === employer.ein" class="text-brand-400">Selected</span>
-        </div>
-      </div>
-    </div>
 
-    <div v-if="selectedEmployer" class="mt-10">
-      <h2 class="text-2xl font-semibold text-white">Reporting Plans for {{ selectedEmployer.name }}</h2>
-      <p class="text-sm text-slate-400 mt-1">EIN: {{ selectedEmployer.ein }}</p>
-
-      <div v-if="reportingPlansLoading" class="mt-4 text-slate-400 text-sm">Loading reporting plans...</div>
-
-      <div v-else-if="reportingPlansError" class="mt-4 bg-red-500/10 border border-red-500/30 text-red-400 rounded-xl px-5 py-4 text-sm">
-        {{ reportingPlansError }}
-      </div>
-
-      <div v-else-if="reportingPlans.length === 0" class="mt-4 text-slate-500 text-sm">
-        No reporting plans found for this employer.
-      </div>
-
-      <div v-else class="mt-4 space-y-2">
+        <!-- Expansion row: reporting plans inline below selected employer -->
         <div
-          v-for="plan in reportingPlans"
-          :key="plan.id"
-          class="bg-slate-900 border border-slate-800 rounded-xl px-4 py-3"
+          v-if="selectedEmployer?.ein === employer.ein"
+          class="bg-slate-950 border border-brand-500 border-t-0 rounded-b-xl px-5 py-4 -mt-3"
         >
-          <div class="flex items-center justify-between gap-3">
-            <h3 class="text-sm font-medium text-white truncate">{{ plan.plan_name || 'Unnamed Plan' }}</h3>
-            <span class="text-xs text-slate-400 shrink-0">{{ plan.plan_market_type }}</span>
+          <h2 class="text-sm font-semibold text-brand-400 mb-3">Reporting Plans</h2>
+
+          <div v-if="reportingPlansLoading" class="text-slate-400 text-sm">Loading reporting plans…</div>
+
+          <div v-else-if="reportingPlansError" class="bg-red-500/10 border border-red-500/30 text-red-400 rounded-xl px-4 py-3 text-sm">
+            {{ reportingPlansError }}
           </div>
-          <div class="mt-1 text-xs text-slate-500">
-            <span>ID: {{ plan.plan_id }}</span>
-            <span> · </span>
-            <span>Type: {{ plan.plan_id_type }}</span>
-            <span v-if="plan.issuer_name"> · Issuer: {{ plan.issuer_name }}</span>
+
+          <div v-else-if="reportingPlans.length === 0" class="text-slate-500 text-sm">
+            No reporting plans found for this employer.
+          </div>
+
+          <div v-else class="space-y-2">
+            <div
+              v-for="plan in reportingPlans"
+              :key="plan.id"
+              class="bg-slate-900 border border-slate-800 rounded-xl px-4 py-3"
+            >
+              <div class="flex items-center justify-between gap-3">
+                <h3 class="text-sm font-medium text-white truncate">{{ plan.plan_name || 'Unnamed Plan' }}</h3>
+                <span class="text-xs text-slate-400 shrink-0">{{ plan.plan_market_type }}</span>
+              </div>
+              <div class="mt-1 text-xs text-slate-500">
+                <span>ID: {{ plan.plan_id }}</span>
+                <span> · </span>
+                <span>Type: {{ plan.plan_id_type }}</span>
+                <span v-if="plan.issuer_name"> · Issuer: {{ plan.issuer_name }}</span>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
+      </template>
     </div>
 
     <!-- Empty state (after search) -->
@@ -254,6 +264,14 @@ function onEmployerKeydown(event, employer) {
 }
 
 async function selectEmployer(employer) {
+  // Toggle: clicking the same employer again collapses the expansion row
+  if (selectedEmployer.value?.ein === employer.ein) {
+    selectedEmployer.value = null
+    reportingPlans.value = []
+    reportingPlansError.value = null
+    return
+  }
+
   selectedEmployer.value = employer
   reportingPlansError.value = null
   reportingPlans.value = []
