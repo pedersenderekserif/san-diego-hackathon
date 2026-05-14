@@ -53,8 +53,17 @@
     <div v-if="results.length > 0" class="space-y-3">
       <div
         v-for="employer in results"
-        :key="employer.ein"
-        class="bg-slate-900 border border-slate-800 hover:border-slate-600 rounded-xl p-5 transition-colors cursor-pointer group"
+        :key="`${employer.ein}-${employer.name}`"
+        @click="selectEmployer(employer)"
+        @keydown="onEmployerKeydown($event, employer)"
+        role="button"
+        tabindex="0"
+        :class="[
+          'bg-slate-900 border rounded-xl p-5 transition-colors cursor-pointer group',
+          selectedEmployer?.ein === employer.ein
+            ? 'border-brand-500'
+            : 'border-slate-800 hover:border-slate-600'
+        ]"
       >
         <div class="flex items-start justify-between gap-4">
           <div class="min-w-0">
@@ -82,6 +91,41 @@
           <span v-if="employer.employees">· {{ employer.employees.toLocaleString() }} employees</span>
           <span v-if="employer.hasPriceData" class="text-emerald-500">✓ Price data available</span>
           <span v-else class="text-amber-500">⚠ No price data</span>
+          <span v-if="selectedEmployer?.ein === employer.ein" class="text-brand-400">Selected</span>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="selectedEmployer" class="mt-10">
+      <h2 class="text-2xl font-semibold text-white">Reporting Plans for {{ selectedEmployer.name }}</h2>
+      <p class="text-sm text-slate-400 mt-1">EIN: {{ selectedEmployer.ein }}</p>
+
+      <div v-if="reportingPlansLoading" class="mt-4 text-slate-400 text-sm">Loading reporting plans...</div>
+
+      <div v-else-if="reportingPlansError" class="mt-4 bg-red-500/10 border border-red-500/30 text-red-400 rounded-xl px-5 py-4 text-sm">
+        {{ reportingPlansError }}
+      </div>
+
+      <div v-else-if="reportingPlans.length === 0" class="mt-4 text-slate-500 text-sm">
+        No reporting plans found for this employer.
+      </div>
+
+      <div v-else class="mt-4 space-y-2">
+        <div
+          v-for="plan in reportingPlans"
+          :key="plan.id"
+          class="bg-slate-900 border border-slate-800 rounded-xl px-4 py-3"
+        >
+          <div class="flex items-center justify-between gap-3">
+            <h3 class="text-sm font-medium text-white truncate">{{ plan.plan_name || 'Unnamed Plan' }}</h3>
+            <span class="text-xs text-slate-400 shrink-0">{{ plan.plan_market_type }}</span>
+          </div>
+          <div class="mt-1 text-xs text-slate-500">
+            <span>ID: {{ plan.plan_id }}</span>
+            <span> · </span>
+            <span>Type: {{ plan.plan_id_type }}</span>
+            <span v-if="plan.issuer_name"> · Issuer: {{ plan.issuer_name }}</span>
+          </div>
         </div>
       </div>
     </div>
@@ -114,6 +158,11 @@ const hasSearched = ref(false)
 const activeFilter = ref('all')
 const results = ref([])
 const error = ref(null)
+const selectedEmployer = ref(null)
+const reportingPlans = ref([])
+const reportingPlansLoading = ref(false)
+const reportingPlansError = ref(null)
+const reportingPlanFilters = ref(null)
 
 const filters = [
   { label: 'All Plans', value: 'all' },
@@ -135,6 +184,17 @@ function mapFiling(f) {
   }
 }
 
+function mapReportingPlan(plan) {
+  return {
+    id: plan.id,
+    plan_id: plan.plan_id,
+    plan_name: plan.plan_name,
+    plan_id_type: plan.plan_id_type,
+    plan_market_type: plan.plan_market_type,
+    issuer_name: plan.issuer_name
+  }
+}
+
 let debounceTimer = null
 
 function onInput() {
@@ -142,6 +202,9 @@ function onInput() {
   error.value = null
   if (!query.value.trim()) {
     results.value = []
+    selectedEmployer.value = null
+    reportingPlans.value = []
+    reportingPlansError.value = null
     hasSearched.value = false
     return
   }
@@ -149,6 +212,69 @@ function onInput() {
   debounceTimer = setTimeout(() => {
     search(query.value.trim())
   }, 350)
+}
+
+async function ensureReportingPlanFilters() {
+  if (reportingPlanFilters.value) {
+    return reportingPlanFilters.value
+  }
+
+  const res = await fetch('/api/v1/reporting-plans/filters')
+  const json = await res.json()
+  if (!res.ok) {
+    throw new Error(json?.error?.message ?? 'Failed to load reporting plan filters')
+  }
+
+  reportingPlanFilters.value = json?.data ?? null
+  return reportingPlanFilters.value
+}
+
+function reportingPlanParams(ein, filters) {
+  const params = new URLSearchParams()
+  params.set('eins', ein)
+
+  for (const ingestorID of filters?.ingestor_ids ?? []) {
+    params.append('ingestor_ids', ingestorID)
+  }
+  for (const planIDType of filters?.plan_id_types ?? []) {
+    params.append('plan_id_types', planIDType)
+  }
+  for (const planMarketType of filters?.plan_market_types ?? []) {
+    params.append('plan_market_types', planMarketType)
+  }
+
+  return params
+}
+
+function onEmployerKeydown(event, employer) {
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault()
+    selectEmployer(employer)
+  }
+}
+
+async function selectEmployer(employer) {
+  selectedEmployer.value = employer
+  reportingPlansError.value = null
+  reportingPlans.value = []
+  reportingPlansLoading.value = true
+
+  try {
+    const filters = await ensureReportingPlanFilters()
+    const params = reportingPlanParams(employer.ein, filters)
+    const res = await fetch(`/api/v1/reporting-plans?${params.toString()}`)
+    const json = await res.json()
+    if (!res.ok) {
+      reportingPlansError.value = json?.error?.message ?? 'Failed to fetch reporting plans'
+      return
+    }
+
+    reportingPlans.value = (json?.data ?? []).map(mapReportingPlan)
+  } catch (fetchError) {
+    reportingPlansError.value = fetchError?.message || 'Failed to fetch reporting plans'
+  } finally {
+    reportingPlansLoading.value = false
+  }
 }
 
 async function search(q) {
@@ -160,6 +286,9 @@ async function search(q) {
       results.value = []
     } else {
       results.value = (json.data ?? []).map(mapFiling)
+      selectedEmployer.value = null
+      reportingPlans.value = []
+      reportingPlansError.value = null
     }
     hasSearched.value = true
   } catch (e) {

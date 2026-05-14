@@ -12,6 +12,7 @@ func New(db *sql.DB) http.Handler {
 
 	h := &handlers.Handler{DB: db}
 
+	mux.HandleFunc("GET /v1/reporting-plans/filters", h.GetReportingPlanFilters)
 	mux.HandleFunc("GET /v1/reporting-plans", h.ListReportingPlans)
 	mux.HandleFunc("GET /v1/indexes", h.ListIndexes)
 	mux.HandleFunc("GET /v1/index-templates", h.ListIndexTemplates)

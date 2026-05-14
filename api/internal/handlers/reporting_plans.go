@@ -25,6 +25,29 @@ type reportingPlan struct {
 	PlanSponsorName string    `json:"plan_sponsor_name"`
 }
 
+type reportingPlanFilters struct {
+	IngestorIDs     []uuid.UUID `json:"ingestor_ids"`
+	PlanIDTypes     []string    `json:"plan_id_types"`
+	PlanMarketTypes []string    `json:"plan_market_types"`
+}
+
+func (h *Handler) GetReportingPlanFilters(w http.ResponseWriter, r *http.Request) {
+	filters, err := queryReportingPlanFilters(r.Context(), h.DB)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{
+			"error": map[string]string{
+				"code":    "query_failed",
+				"message": "failed to query reporting plan filters",
+			},
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"data": filters,
+	})
+}
+
 func (h *Handler) ListReportingPlans(w http.ResponseWriter, r *http.Request) {
 	ingestorIDs, err := parseUUIDFilter(r, "ingestor_ids")
 	if err != nil {
@@ -39,6 +62,17 @@ func (h *Handler) ListReportingPlans(w http.ResponseWriter, r *http.Request) {
 
 	planIDTypes := parseStringFilter(r, "plan_id_types")
 	planMarketTypes := parseStringFilter(r, "plan_market_types")
+	eins := parseStringFilter(r, "eins")
+
+	normalizedEINs := make([]string, 0, len(eins)*2)
+	for _, ein := range eins {
+		plain, dashed := einVariants(ein)
+		if plain == "" {
+			continue
+		}
+		normalizedEINs = append(normalizedEINs, plain, dashed)
+	}
+	normalizedEINs = dedupeStrings(normalizedEINs)
 
 	if len(ingestorIDs) == 0 || len(planIDTypes) == 0 || len(planMarketTypes) == 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
@@ -50,7 +84,7 @@ func (h *Handler) ListReportingPlans(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	plans, err := queryReportingPlans(r.Context(), h.DB, ingestorIDs, planIDTypes, planMarketTypes)
+	plans, err := queryReportingPlans(r.Context(), h.DB, ingestorIDs, planIDTypes, planMarketTypes, normalizedEINs)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{
 			"error": map[string]string{
@@ -69,7 +103,7 @@ func (h *Handler) ListReportingPlans(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func queryReportingPlans(ctx context.Context, db *sql.DB, ingestorIDs []uuid.UUID, planIDTypes, planMarketTypes []string) ([]reportingPlan, error) {
+func queryReportingPlans(ctx context.Context, db *sql.DB, ingestorIDs []uuid.UUID, planIDTypes, planMarketTypes, eins []string) ([]reportingPlan, error) {
 	if len(ingestorIDs) == 0 || len(planIDTypes) == 0 || len(planMarketTypes) == 0 {
 		return nil, errors.New("all filters must be provided")
 	}
@@ -77,7 +111,15 @@ func queryReportingPlans(ctx context.Context, db *sql.DB, ingestorIDs []uuid.UUI
 	nextPlaceholder := 1
 	ingestorPlaceholders, nextPlaceholder := placeholders(nextPlaceholder, len(ingestorIDs))
 	planIDTypePlaceholders, nextPlaceholder := placeholders(nextPlaceholder, len(planIDTypes))
-	planMarketTypePlaceholders, _ := placeholders(nextPlaceholder, len(planMarketTypes))
+	planMarketTypePlaceholders, nextPlaceholder := placeholders(nextPlaceholder, len(planMarketTypes))
+
+	einFilter := ""
+	if len(eins) > 0 {
+		einPlaceholders, next := placeholders(nextPlaceholder, len(eins))
+		einFilter = fmt.Sprintf("\n\tand rp.plan_id_type = 'EIN'\n\tand rp.plan_id IN (%s)", einPlaceholders)
+		nextPlaceholder = next
+	}
+	_ = nextPlaceholder
 
 	query := fmt.Sprintf(`
 select
@@ -103,9 +145,10 @@ where rp.index_id IN (
 	)
 	and rp.plan_id_type IN (%s)
 	and rp.plan_market_type IN (%s)
-`, ingestorPlaceholders, planIDTypePlaceholders, planMarketTypePlaceholders)
+	%s
+`, ingestorPlaceholders, planIDTypePlaceholders, planMarketTypePlaceholders, einFilter)
 
-	args := make([]any, 0, len(ingestorIDs)+len(planIDTypes)+len(planMarketTypes))
+	args := make([]any, 0, len(ingestorIDs)+len(planIDTypes)+len(planMarketTypes)+len(eins))
 	for _, id := range ingestorIDs {
 		args = append(args, id)
 	}
@@ -114,6 +157,9 @@ where rp.index_id IN (
 	}
 	for _, planMarketType := range planMarketTypes {
 		args = append(args, planMarketType)
+	}
+	for _, ein := range eins {
+		args = append(args, ein)
 	}
 
 	rows, err := db.QueryContext(ctx, query, args...)
@@ -149,6 +195,107 @@ where rp.index_id IN (
 	}
 
 	return plans, nil
+}
+
+func queryReportingPlanFilters(ctx context.Context, db *sql.DB) (reportingPlanFilters, error) {
+	filters := reportingPlanFilters{
+		IngestorIDs:     make([]uuid.UUID, 0),
+		PlanIDTypes:     make([]string, 0),
+		PlanMarketTypes: make([]string, 0),
+	}
+
+	ingestorRows, err := db.QueryContext(ctx, `
+select distinct ingestor_id
+from indexes
+where deleted_at is null
+	and archived_at is null
+order by ingestor_id
+`)
+	if err != nil {
+		return filters, err
+	}
+	defer ingestorRows.Close()
+
+	for ingestorRows.Next() {
+		var id uuid.UUID
+		if err := ingestorRows.Scan(&id); err != nil {
+			return filters, err
+		}
+		filters.IngestorIDs = append(filters.IngestorIDs, id)
+	}
+	if err := ingestorRows.Err(); err != nil {
+		return filters, err
+	}
+
+	planIDTypeRows, err := db.QueryContext(ctx, `
+select distinct rp.plan_id_type
+from reporting_plans rp
+join indexes i on i.id = rp.index_id
+where i.deleted_at is null
+	and i.archived_at is null
+	and rp.plan_id_type <> ''
+order by rp.plan_id_type
+`)
+	if err != nil {
+		return filters, err
+	}
+	defer planIDTypeRows.Close()
+
+	for planIDTypeRows.Next() {
+		var planIDType string
+		if err := planIDTypeRows.Scan(&planIDType); err != nil {
+			return filters, err
+		}
+		filters.PlanIDTypes = append(filters.PlanIDTypes, planIDType)
+	}
+	if err := planIDTypeRows.Err(); err != nil {
+		return filters, err
+	}
+
+	planMarketTypeRows, err := db.QueryContext(ctx, `
+select distinct rp.plan_market_type
+from reporting_plans rp
+join indexes i on i.id = rp.index_id
+where i.deleted_at is null
+	and i.archived_at is null
+	and rp.plan_market_type <> ''
+order by rp.plan_market_type
+`)
+	if err != nil {
+		return filters, err
+	}
+	defer planMarketTypeRows.Close()
+
+	for planMarketTypeRows.Next() {
+		var planMarketType string
+		if err := planMarketTypeRows.Scan(&planMarketType); err != nil {
+			return filters, err
+		}
+		filters.PlanMarketTypes = append(filters.PlanMarketTypes, planMarketType)
+	}
+	if err := planMarketTypeRows.Err(); err != nil {
+		return filters, err
+	}
+
+	return filters, nil
+}
+
+func dedupeStrings(values []string) []string {
+	if len(values) <= 1 {
+		return values
+	}
+
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+
+	return result
 }
 
 func parseUUIDFilter(r *http.Request, key string) ([]uuid.UUID, error) {
