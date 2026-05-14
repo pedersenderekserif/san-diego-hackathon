@@ -34,7 +34,7 @@
 
     <!-- Stats row -->
     <div class="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-20">
-      <div v-for="stat in stats" :key="stat.label" class="bg-slate-900 border border-slate-800 rounded-xl p-6 text-center">
+      <div v-for="stat in stats" :key="stat.label" class="bg-brand-950/40 border border-brand-900/20 rounded-xl p-6 text-center">
         <div class="text-3xl font-bold text-brand-400 mb-1">{{ stat.value }}</div>
         <div class="text-sm text-slate-500">{{ stat.label }}</div>
       </div>
@@ -44,7 +44,7 @@
     <div class="mb-20">
       <h2 class="text-2xl font-bold text-white mb-8 text-center">How it works</h2>
       <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div v-for="step in steps" :key="step.title" class="bg-slate-900 border border-slate-800 rounded-xl p-6">
+        <div v-for="step in steps" :key="step.title" class="bg-brand-950/40 border border-brand-900/20 rounded-xl p-6">
           <div class="text-3xl mb-4">{{ step.icon }}</div>
           <h3 class="text-lg font-semibold text-white mb-2">{{ step.title }}</h3>
           <p class="text-slate-400 text-sm leading-relaxed">{{ step.description }}</p>
@@ -53,7 +53,7 @@
     </div>
 
     <!-- CTA -->
-    <div class="text-center bg-slate-900 border border-slate-800 rounded-2xl p-12">
+    <div class="text-center bg-brand-950/40 border border-brand-900/20 rounded-2xl p-12">
       <h2 class="text-2xl font-bold text-white mb-3">Ready to dig in?</h2>
       <p class="text-slate-400 mb-6">Search by employer name or EIN to see their network choices and coverage data.</p>
       <RouterLink
