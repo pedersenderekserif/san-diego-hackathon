@@ -17,7 +17,7 @@
         @input="onInput"
         type="search"
         placeholder="Search by employer name or EIN…"
-        class="w-full bg-slate-900 border border-slate-700 focus:border-brand-500 focus:ring-1 focus:ring-brand-500 rounded-xl pl-12 pr-4 py-4 text-white placeholder-slate-500 outline-none transition-colors"
+        class="w-full bg-brand-950/40 border border-brand-900/30 focus:border-brand-500 focus:ring-1 focus:ring-brand-500 rounded-xl pl-12 pr-4 py-4 text-white placeholder-slate-500 outline-none transition-colors"
       />
       <div v-if="loading" class="absolute right-4 top-1/2 -translate-y-1/2">
         <svg class="animate-spin h-5 w-5 text-brand-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">

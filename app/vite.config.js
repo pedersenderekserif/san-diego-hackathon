@@ -11,8 +11,8 @@ export default defineConfig({
         name: 'Employer Network Explorer',
         short_name: 'NetExplorer',
         description: 'Explore self-funded employer health networks using Transparency in Coverage data',
-        theme_color: '#0ea5e9',
-        background_color: '#0f172a',
+        theme_color: '#2E8FFF',
+        background_color: '#041739',
         display: 'standalone',
         icons: [
           {
