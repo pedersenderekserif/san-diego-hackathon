@@ -13,7 +13,7 @@ help:
 
 start: db
 	@echo ">>> Starting API and App (Ctrl+C to stop)..."
-	@(cd api && make start) & (cd app && npm run dev); wait
+	@(cd api && make start) & (cd app && npm install && npm run dev); wait
 
 stop:
 	docker compose stop
@@ -28,7 +28,7 @@ api: db
 	cd api && make start
 
 app:
-	cd app && npm run dev
+	cd app && npm install && npm run dev
 
 install:
 	cd app && npm install
