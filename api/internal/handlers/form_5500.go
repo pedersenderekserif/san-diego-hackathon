@@ -173,7 +173,7 @@ func queryForm5500(ctx context.Context, conn *sql.DB, eins, sponsorNames []strin
 				where i.deleted_at is null
 					and i.archived_at is null
 					and i.ingestor_id in (%s)
-					and rp.plan_id_type = 'EIN'
+					and UPPER(rp.plan_id_type) = 'EIN'
 					and replace(rp.plan_id, '-', '') = replace(form_5500.spons_dfe_ein, '-', '')
 			)
 		`, payorPlaceholders))

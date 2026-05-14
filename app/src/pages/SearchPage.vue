@@ -175,7 +175,7 @@
       <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mx-auto mb-4 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
       </svg>
-      <p class="text-sm">Type an employer name or EIN above to get started</p>
+      <p class="text-sm">Select a payor network or type an employer name / EIN above to get started</p>
     </div>
   </div>
 </template>
@@ -240,11 +240,16 @@ function onInput() {
   clearTimeout(debounceTimer)
   error.value = null
   if (!query.value.trim()) {
-    results.value = []
     selectedEmployer.value = null
     reportingPlans.value = []
     reportingPlansError.value = null
-    hasSearched.value = false
+    if (selectedPayorId.value) {
+      loading.value = true
+      debounceTimer = setTimeout(() => search(''), 350)
+    } else {
+      results.value = []
+      hasSearched.value = false
+    }
     return
   }
   loading.value = true
@@ -321,7 +326,7 @@ function onPayorChange() {
   error.value = null
 
   const trimmed = query.value.trim()
-  if (!trimmed) {
+  if (!trimmed && !selectedPayorId.value) {
     results.value = []
     hasSearched.value = false
     return
