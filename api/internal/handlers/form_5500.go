@@ -55,10 +55,16 @@ type form5500 struct {
 	DateReceived          string `json:"date_received"`
 }
 
+// aetnaPayorID is the well-known payor_id (== ingestor_id) for Aetna. When this
+// payor is requested, form 5500 results are scoped using the in-memory Aetna MRF
+// EIN set rather than the reporting_plans/indexes DB subquery.
+const aetnaPayorID = "9b29c0e6-21b4-41b0-bd13-a7d8a4342d4c"
+
 func (h *Handler) ListForm5500(w http.ResponseWriter, r *http.Request) {
 	eins := parseStringFilter(r, "eins")
 	sponsorNames := parseStringFilter(r, "sponsor_names")
 	var payorIDs []string
+	isAetna := false
 	if rawPayorID := strings.TrimSpace(r.URL.Query().Get("payor_id")); rawPayorID != "" {
 		parsed, err := uuid.Parse(rawPayorID)
 		if err != nil {
@@ -70,7 +76,11 @@ func (h *Handler) ListForm5500(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		payorIDs = []string{parsed.String()}
+		if parsed.String() == aetnaPayorID {
+			isAetna = true
+		} else {
+			payorIDs = []string{parsed.String()}
+		}
 	}
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 
@@ -86,7 +96,7 @@ func (h *Handler) ListForm5500(w http.ResponseWriter, r *http.Request) {
 	}
 	eins = normalizedEINs
 
-	if len(eins) == 0 && len(sponsorNames) == 0 && q == "" && len(payorIDs) == 0 {
+	if len(eins) == 0 && len(sponsorNames) == 0 && q == "" && len(payorIDs) == 0 && !isAetna {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"error": map[string]string{
 				"code":    "missing_filters",
@@ -96,7 +106,22 @@ func (h *Handler) ListForm5500(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filings, err := queryForm5500(r.Context(), h.DB, eins, sponsorNames, q, payorIDs)
+	var filings []form5500
+	var err error
+	if isAetna {
+		if h.AetnaSource == nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+				"error": map[string]string{
+					"code":    "source_unavailable",
+					"message": "Aetna MRF source could not be loaded at startup",
+				},
+			})
+			return
+		}
+		filings, err = queryForm5500Aetna(r.Context(), h.DB, eins, sponsorNames, q, h.AetnaSource.EINSet())
+	} else {
+		filings, err = queryForm5500(r.Context(), h.DB, eins, sponsorNames, q, payorIDs)
+	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{
 			"error": map[string]string{
@@ -190,6 +215,131 @@ func queryForm5500(ctx context.Context, conn *sql.DB, eins, sponsorNames []strin
 	}
 	if len(scopeConditions) > 0 {
 		whereParts = append(whereParts, strings.Join(scopeConditions, " and "))
+	}
+
+	query := fmt.Sprintf(`
+select
+	ack_id
+	, coalesce(form_plan_year_begin_date, '') as form_plan_year_begin_date
+	, coalesce(form_tax_prd, '') as form_tax_prd
+	, coalesce(plan_name, '') as plan_name
+	, coalesce(plan_eff_date, '') as plan_eff_date
+	, coalesce(sponsor_dfe_name, '') as sponsor_dfe_name
+	, coalesce(spons_dfe_dba_name, '') as spons_dfe_dba_name
+	, coalesce(spons_dfe_ein, '') as spons_dfe_ein
+	, coalesce(spons_dfe_mail_us_city, '') as spons_dfe_mail_us_city
+	, coalesce(spons_dfe_mail_us_state, '') as spons_dfe_mail_us_state
+	, coalesce(spons_dfe_mail_us_zip, '') as spons_dfe_mail_us_zip
+	, coalesce(type_plan_entity_cd, '') as type_plan_entity_cd
+	, coalesce(type_welfare_bnft_code, '') as type_welfare_bnft_code
+	, coalesce(tot_act_rtd_sep_benef_cnt, '') as tot_act_rtd_sep_benef_cnt
+	, coalesce(filing_status, '') as filing_status
+	, coalesce(date_received, '') as date_received
+from form_5500
+where %s
+`, strings.Join(whereParts, " and "))
+
+	rows, err := conn.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make([]form5500, 0)
+	for rows.Next() {
+		var f form5500
+		if err := rows.Scan(
+			&f.AckID,
+			&f.FormPlanYearBeginDate,
+			&f.FormTaxPrd,
+			&f.PlanName,
+			&f.PlanEffDate,
+			&f.SponsorDfeName,
+			&f.SponsDfeDbaName,
+			&f.SponsDfeEin,
+			&f.SponsDfeMailUsCity,
+			&f.SponsDfeMailUsState,
+			&f.SponsDfeMailUsZip,
+			&f.TypePlanEntityCd,
+			&f.TypeWelfareBnftCode,
+			&f.TotActRtdSepBenefCnt,
+			&f.FilingStatus,
+			&f.DateReceived,
+		); err != nil {
+			return nil, err
+		}
+		result = append(result, f)
+	}
+
+	return result, rows.Err()
+}
+
+// queryForm5500Aetna queries form_5500 records scoped to the EINs present in the
+// Aetna MRF in-memory source, instead of going through the reporting_plans/indexes
+// DB subquery used for other payors.
+func queryForm5500Aetna(ctx context.Context, conn *sql.DB, eins, sponsorNames []string, q string, aetnaEINs map[string]struct{}) ([]form5500, error) {
+	if len(aetnaEINs) == 0 {
+		return []form5500{}, nil
+	}
+
+	args := make([]any, 0)
+	searchConditions := make([]string, 0, 3)
+	nextPlaceholder := 1
+
+	// Scope: restrict to EINs present in the Aetna MRF source.
+	mrfEINSlice := make([]string, 0, len(aetnaEINs)*2)
+	for plain := range aetnaEINs {
+		dashed := plain[:2] + "-" + plain[2:]
+		mrfEINSlice = append(mrfEINSlice, plain, dashed)
+	}
+	mrfPlaceholders, next := placeholders(nextPlaceholder, len(mrfEINSlice))
+	nextPlaceholder = next
+	scopeCondition := fmt.Sprintf("spons_dfe_ein IN (%s)", mrfPlaceholders)
+	for _, e := range mrfEINSlice {
+		args = append(args, e)
+	}
+
+	if len(eins) > 0 {
+		einPlaceholders, next := placeholders(nextPlaceholder, len(eins))
+		searchConditions = append(searchConditions, fmt.Sprintf("spons_dfe_ein IN (%s)", einPlaceholders))
+		nextPlaceholder = next
+		for _, ein := range eins {
+			args = append(args, ein)
+		}
+	}
+
+	if len(sponsorNames) > 0 {
+		namePlaceholders, next := placeholders(nextPlaceholder, len(sponsorNames))
+		searchConditions = append(searchConditions, fmt.Sprintf("sponsor_dfe_name IN (%s)", namePlaceholders))
+		nextPlaceholder = next
+		for _, name := range sponsorNames {
+			args = append(args, name)
+		}
+	}
+
+	if q != "" {
+		plain, dashed := einVariants(q)
+		if plain != "" {
+			einPlaceholders, next := placeholders(nextPlaceholder, 2)
+			searchConditions = append(searchConditions, fmt.Sprintf("spons_dfe_ein IN (%s)", einPlaceholders))
+			args = append(args, plain, dashed)
+			nextPlaceholder = next
+		} else {
+			like := "%" + q + "%"
+			searchConditions = append(searchConditions, fmt.Sprintf(
+				"(sponsor_dfe_name ILIKE $%d OR spons_dfe_ein ILIKE $%d)",
+				nextPlaceholder, nextPlaceholder+1,
+			))
+			args = append(args, like, like)
+			nextPlaceholder += 2
+		}
+	}
+
+	_ = nextPlaceholder
+
+	whereParts := []string{scopeCondition}
+	if len(searchConditions) > 0 {
+		whereParts = append(whereParts, "("+strings.Join(searchConditions, " or ")+")")
 	}
 
 	query := fmt.Sprintf(`

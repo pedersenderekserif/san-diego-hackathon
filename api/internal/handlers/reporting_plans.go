@@ -84,15 +84,32 @@ func (h *Handler) ListReportingPlans(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	plans, err := queryReportingPlans(r.Context(), h.DB, ingestorIDs, planIDTypes, planMarketTypes, normalizedEINs)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{
-			"error": map[string]string{
-				"code":    "query_failed",
-				"message": "failed to query reporting plans",
-			},
-		})
-		return
+	// Detect whether the sole ingestor ID is Aetna's well-known ID.
+	isAetna := len(ingestorIDs) == 1 && ingestorIDs[0].String() == aetnaPayorID
+
+	var plans []reportingPlan
+	if isAetna {
+		if h.AetnaSource == nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+				"error": map[string]string{
+					"code":    "source_unavailable",
+					"message": "Aetna MRF source could not be loaded at startup",
+				},
+			})
+			return
+		}
+		plans = queryReportingPlansAetna(h.AetnaSource, planIDTypes, planMarketTypes, normalizedEINs)
+	} else {
+		plans, err = queryReportingPlans(r.Context(), h.DB, ingestorIDs, planIDTypes, planMarketTypes, normalizedEINs)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{
+				"error": map[string]string{
+					"code":    "query_failed",
+					"message": "failed to query reporting plans",
+				},
+			})
+			return
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -195,6 +212,49 @@ where rp.index_id IN (
 	}
 
 	return plans, nil
+}
+
+// queryReportingPlansAetna returns reporting plans sourced from the in-memory
+// Aetna MRF data, filtered by planIDTypes, planMarketTypes, and (optionally) EINs.
+// DB-only fields (ID, IndexID, RunID, FileID, CreatedAt, IssuerName,
+// PlanSponsorName) are left at their zero values.
+func queryReportingPlansAetna(src *AetnaSource, planIDTypes, planMarketTypes, eins []string) []reportingPlan {
+	planIDTypeSet := make(map[string]struct{}, len(planIDTypes))
+	for _, t := range planIDTypes {
+		planIDTypeSet[strings.ToUpper(t)] = struct{}{}
+	}
+	planMarketTypeSet := make(map[string]struct{}, len(planMarketTypes))
+	for _, m := range planMarketTypes {
+		planMarketTypeSet[strings.ToUpper(m)] = struct{}{}
+	}
+
+	// Build a set of normalised EINs for fast lookup (only used when provided).
+	einSet := make(map[string]struct{}, len(eins))
+	for _, e := range eins {
+		einSet[strings.ReplaceAll(e, "-", "")] = struct{}{}
+	}
+
+	result := make([]reportingPlan, 0)
+	for _, p := range src.Plans {
+		if _, ok := planIDTypeSet[strings.ToUpper(p.PlanIDType)]; !ok {
+			continue
+		}
+		if _, ok := planMarketTypeSet[strings.ToUpper(p.PlanMarketType)]; !ok {
+			continue
+		}
+		if len(einSet) > 0 {
+			if _, ok := einSet[strings.ReplaceAll(p.PlanID, "-", "")]; !ok {
+				continue
+			}
+		}
+		result = append(result, reportingPlan{
+			PlanID:         p.PlanID,
+			PlanName:       p.PlanName,
+			PlanIDType:     p.PlanIDType,
+			PlanMarketType: p.PlanMarketType,
+		})
+	}
+	return result
 }
 
 func queryReportingPlanFilters(ctx context.Context, db *sql.DB) (reportingPlanFilters, error) {

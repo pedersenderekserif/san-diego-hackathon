@@ -35,7 +35,7 @@
         @change="onPayorChange"
         class="w-full bg-slate-900 border border-slate-700 focus:border-brand-500 focus:ring-1 focus:ring-brand-500 rounded-xl px-4 py-3 text-white outline-none transition-colors"
       >
-        <option value="">All payors</option>
+        <option value="" disabled>Select Payor</option>
         <option
           v-for="payor in payorOptions"
           :key="payor.payor_id"
