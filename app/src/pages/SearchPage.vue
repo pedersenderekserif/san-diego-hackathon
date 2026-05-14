@@ -72,7 +72,7 @@
 
     <!-- Results -->
     <div v-if="results.length > 0" class="space-y-3">
-      <template v-for="employer in results" :key="`${employer.ein}-${employer.name}`">
+      <template v-for="employer in results" :key="employer._key">
         <!-- Employer card -->
         <div
           @click="selectEmployer(employer)"
@@ -81,7 +81,7 @@
           tabindex="0"
           :class="[
             'bg-slate-900 border rounded-xl p-5 transition-colors cursor-pointer group',
-            selectedEmployer?.ein === employer.ein
+            selectedEmployer?._key === employer._key
               ? 'border-brand-500 rounded-b-none'
               : 'border-slate-800 hover:border-slate-600'
           ]"
@@ -107,7 +107,7 @@
               </span>
               <!-- Expand/collapse chevron -->
               <svg
-                :class="['h-4 w-4 text-slate-500 transition-transform mt-1', selectedEmployer?.ein === employer.ein ? 'rotate-180 text-brand-400' : '']"
+                :class="['h-4 w-4 text-slate-500 transition-transform mt-1', selectedEmployer?._key === employer._key ? 'rotate-180 text-brand-400' : '']"
                 xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"
               >
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
@@ -124,7 +124,7 @@
 
         <!-- Expansion row: reporting plans inline below selected employer -->
         <div
-          v-if="selectedEmployer?.ein === employer.ein"
+          v-if="selectedEmployer?._key === employer._key"
           class="bg-slate-950 border border-brand-500 border-t-0 rounded-b-xl px-5 py-4 -mt-3"
         >
           <h2 class="text-sm font-semibold text-brand-400 mb-3">Reporting Plans</h2>
@@ -209,15 +209,18 @@ const filters = [
   { label: 'Has Price Data', value: 'has-price-data' }
 ]
 
-function mapFiling(f) {
+function mapFiling(f, index) {
   const plainEIN = f.spons_dfe_ein ? f.spons_dfe_ein.replace(/-/g, '') : ''
   const networks = []
   if (aetnaEINs.value.has(plainEIN)) networks.push('Aetna')
   if (bcbsilEINs.value.has(plainEIN)) networks.push('BCBS IL')
   if (bcbstxEINs.value.has(plainEIN)) networks.push('BCBS TX')
+  const ein = f.spons_dfe_ein
+  const name = f.sponsor_dfe_name || f.spons_dfe_dba_name
   return {
-    ein: f.spons_dfe_ein,
-    name: f.sponsor_dfe_name || f.spons_dfe_dba_name,
+    _key: `${ein ?? ''}-${name ?? ''}-${index}`,
+    ein,
+    name,
     state: f.spons_dfe_mail_us_state,
     planType: f.plan_name || 'Unknown',
     employees: f.tot_act_rtd_sep_benef_cnt ? parseInt(f.tot_act_rtd_sep_benef_cnt, 10) || null : null,
@@ -412,7 +415,7 @@ function onEmployerKeydown(event, employer) {
 
 async function selectEmployer(employer) {
   // Toggle: clicking the same employer again collapses the expansion row
-  if (selectedEmployer.value?.ein === employer.ein) {
+  if (selectedEmployer.value?._key === employer._key) {
     selectedEmployer.value = null
     reportingPlans.value = []
     reportingPlansError.value = null
@@ -444,6 +447,7 @@ async function selectEmployer(employer) {
 }
 
 async function search(q) {
+  results.value = []
   try {
     const params = new URLSearchParams()
     params.set('q', q)
@@ -457,7 +461,7 @@ async function search(q) {
       error.value = json?.error?.message ?? 'An error occurred'
       results.value = []
     } else {
-      results.value = (json.data ?? []).map(mapFiling)
+      results.value = (json.data ?? []).map((f, i) => mapFiling(f, i))
       selectedEmployer.value = null
       reportingPlans.value = []
       reportingPlansError.value = null
