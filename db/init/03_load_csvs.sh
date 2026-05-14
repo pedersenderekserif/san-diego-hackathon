@@ -5,8 +5,11 @@ echo "==> Loading datasets into $POSTGRES_DB..."
 
 # index_templates (plain CSV, no unzip needed)
 echo "  Loading index_templates..."
-psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
-    -c "\COPY index_templates (index_template_id, payor_name, payor_id) FROM '/datasets/index_templates.csv' WITH CSV HEADER"
+psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" <<'SQL'
+CREATE TEMP TABLE tmp_index_templates (LIKE index_templates);
+\COPY tmp_index_templates (index_template_id, payor_name, payor_id) FROM '/datasets/index_templates.csv' WITH CSV HEADER
+INSERT INTO index_templates SELECT * FROM tmp_index_templates ON CONFLICT DO NOTHING;
+SQL
 
 # reporting_plans (zipped CSV)
 echo "  Extracting reporting_plans.csv..."
