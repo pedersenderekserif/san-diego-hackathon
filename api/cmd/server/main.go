@@ -24,10 +24,12 @@ func main() {
 	defer conn.Close()
 
 	aetnaSource := handlers.LoadAetnaSource(context.Background())
+	bcbsilSource := handlers.LoadBCBSILSource(context.Background())
+	bcbstxSource := handlers.LoadBCBSTXSource(context.Background())
 
 	srv := &http.Server{
 		Addr:    ":" + port,
-		Handler: router.New(conn, aetnaSource),
+		Handler: router.New(conn, aetnaSource, bcbsilSource, bcbstxSource),
 	}
 
 	log.Printf("api server listening on :%s", port)

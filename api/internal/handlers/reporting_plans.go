@@ -74,7 +74,13 @@ func (h *Handler) ListReportingPlans(w http.ResponseWriter, r *http.Request) {
 	}
 	normalizedEINs = dedupeStrings(normalizedEINs)
 
-	if len(ingestorIDs) == 0 || len(planIDTypes) == 0 || len(planMarketTypes) == 0 {
+	// Detect whether the sole ingestor ID is Aetna's, BCBSIL's, or BCBSTX's well-known ID.
+	isAetna := len(ingestorIDs) == 1 && ingestorIDs[0].String() == aetnaPayorID
+	isBCBSIL := len(ingestorIDs) == 1 && ingestorIDs[0].String() == bcbsilPayorID
+	isBCBSTX := len(ingestorIDs) == 1 && ingestorIDs[0].String() == bcbstxPayorID
+
+	// plan_market_types is not required for BCBSIL/BCBSTX since their filelists have no market type data.
+	if len(ingestorIDs) == 0 || len(planIDTypes) == 0 || (len(planMarketTypes) == 0 && !isBCBSIL && !isBCBSTX) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"error": map[string]string{
 				"code":    "missing_filters",
@@ -83,9 +89,6 @@ func (h *Handler) ListReportingPlans(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-
-	// Detect whether the sole ingestor ID is Aetna's well-known ID.
-	isAetna := len(ingestorIDs) == 1 && ingestorIDs[0].String() == aetnaPayorID
 
 	var plans []reportingPlan
 	if isAetna {
@@ -99,6 +102,28 @@ func (h *Handler) ListReportingPlans(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		plans = queryReportingPlansAetna(h.AetnaSource, planIDTypes, planMarketTypes, normalizedEINs)
+	} else if isBCBSIL {
+		if h.BCBSILSource == nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+				"error": map[string]string{
+					"code":    "source_unavailable",
+					"message": "BCBSIL MRF source could not be loaded at startup",
+				},
+			})
+			return
+		}
+		plans = queryReportingPlansBCBSIL(h.BCBSILSource, planIDTypes, normalizedEINs)
+	} else if isBCBSTX {
+		if h.BCBSTXSource == nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+				"error": map[string]string{
+					"code":    "source_unavailable",
+					"message": "BCBSTX MRF source could not be loaded at startup",
+				},
+			})
+			return
+		}
+		plans = queryReportingPlansBCBSTX(h.BCBSTXSource, planIDTypes, normalizedEINs)
 	} else {
 		plans, err = queryReportingPlans(r.Context(), h.DB, ingestorIDs, planIDTypes, planMarketTypes, normalizedEINs)
 		if err != nil {
@@ -252,6 +277,73 @@ func queryReportingPlansAetna(src *AetnaSource, planIDTypes, planMarketTypes, ei
 			PlanName:       p.PlanName,
 			PlanIDType:     p.PlanIDType,
 			PlanMarketType: p.PlanMarketType,
+		})
+	}
+	return result
+}
+
+// queryReportingPlansBCBSIL returns reporting plans sourced from the in-memory
+// BCBSIL filelist, filtered by planIDTypes and (optionally) EINs.
+// BCBSIL entries do not carry a plan_market_type, so that filter is omitted.
+// DB-only fields are left at their zero values.
+func queryReportingPlansBCBSIL(src *BCBSILSource, planIDTypes, eins []string) []reportingPlan {
+	planIDTypeSet := make(map[string]struct{}, len(planIDTypes))
+	for _, t := range planIDTypes {
+		planIDTypeSet[strings.ToUpper(t)] = struct{}{}
+	}
+
+	// Only EIN-type plans are present in the BCBSIL filelist.
+	if _, ok := planIDTypeSet["EIN"]; !ok {
+		return []reportingPlan{}
+	}
+
+	einSet := make(map[string]struct{}, len(eins))
+	for _, e := range eins {
+		einSet[strings.ReplaceAll(e, "-", "")] = struct{}{}
+	}
+
+	result := make([]reportingPlan, 0)
+	for _, e := range src.Entries {
+		if len(einSet) > 0 {
+			if _, ok := einSet[strings.ReplaceAll(e.EIN, "-", "")]; !ok {
+				continue
+			}
+		}
+		result = append(result, reportingPlan{
+			PlanID:     e.EIN,
+			PlanName:   e.Name,
+			PlanIDType: "EIN",
+		})
+	}
+	return result
+}
+
+func queryReportingPlansBCBSTX(src *BCBSTXSource, planIDTypes, eins []string) []reportingPlan {
+	planIDTypeSet := make(map[string]struct{}, len(planIDTypes))
+	for _, t := range planIDTypes {
+		planIDTypeSet[strings.ToUpper(t)] = struct{}{}
+	}
+
+	if _, ok := planIDTypeSet["EIN"]; !ok {
+		return []reportingPlan{}
+	}
+
+	einSet := make(map[string]struct{}, len(eins))
+	for _, e := range eins {
+		einSet[strings.ReplaceAll(e, "-", "")] = struct{}{}
+	}
+
+	result := make([]reportingPlan, 0)
+	for _, e := range src.Entries {
+		if len(einSet) > 0 {
+			if _, ok := einSet[strings.ReplaceAll(e.EIN, "-", "")]; !ok {
+				continue
+			}
+		}
+		result = append(result, reportingPlan{
+			PlanID:     e.EIN,
+			PlanName:   e.Name,
+			PlanIDType: "EIN",
 		})
 	}
 	return result
