@@ -6,8 +6,33 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-
 )
+
+// normalizeEIN strips dashes and returns the 9-digit plain EIN if s is a valid
+// EIN (either "XXXXXXXXX" or "XX-XXXXXXX"), otherwise returns "".
+func normalizeEIN(s string) string {
+	stripped := strings.ReplaceAll(strings.TrimSpace(s), "-", "")
+	if len(stripped) != 9 {
+		return ""
+	}
+	for _, c := range stripped {
+		if c < '0' || c > '9' {
+			return ""
+		}
+	}
+	return stripped
+}
+
+// einVariants returns both the plain ("XXXXXXXXX") and dashed ("XX-XXXXXXX")
+// forms of an EIN. Returns ("", "") if s does not look like a valid EIN.
+func einVariants(s string) (plain, dashed string) {
+	plain = normalizeEIN(s)
+	if plain == "" {
+		return "", ""
+	}
+	dashed = plain[:2] + "-" + plain[2:]
+	return plain, dashed
+}
 
 type form5500 struct {
 	AckID                 string `json:"ack_id"`
@@ -32,6 +57,18 @@ func (h *Handler) ListForm5500(w http.ResponseWriter, r *http.Request) {
 	eins := parseStringFilter(r, "eins")
 	sponsorNames := parseStringFilter(r, "sponsor_names")
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
+
+	// Expand each EIN to both plain and dashed forms so either format matches.
+	normalizedEINs := make([]string, 0, len(eins)*2)
+	for _, ein := range eins {
+		plain, dashed := einVariants(ein)
+		if plain == "" {
+			normalizedEINs = append(normalizedEINs, ein) // pass through non-EIN values unchanged
+		} else {
+			normalizedEINs = append(normalizedEINs, plain, dashed)
+		}
+	}
+	eins = normalizedEINs
 
 	if len(eins) == 0 && len(sponsorNames) == 0 && q == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
@@ -87,12 +124,21 @@ func queryForm5500(ctx context.Context, conn *sql.DB, eins, sponsorNames []strin
 	}
 
 	if q != "" {
-		like := "%" + q + "%"
-		conditions = append(conditions, fmt.Sprintf(
-			"(sponsor_dfe_name ILIKE $%d OR spons_dfe_ein ILIKE $%d)",
-			nextPlaceholder, nextPlaceholder+1,
-		))
-		args = append(args, like, like)
+		plain, dashed := einVariants(q)
+		if plain != "" {
+			// q looks like an EIN — match either stored format exactly.
+			einPlaceholders, next := placeholders(nextPlaceholder, 2)
+			conditions = append(conditions, fmt.Sprintf("spons_dfe_ein IN (%s)", einPlaceholders))
+			args = append(args, plain, dashed)
+			nextPlaceholder = next
+		} else {
+			like := "%" + q + "%"
+			conditions = append(conditions, fmt.Sprintf(
+				"(sponsor_dfe_name ILIKE $%d OR spons_dfe_ein ILIKE $%d)",
+				nextPlaceholder, nextPlaceholder+1,
+			))
+			args = append(args, like, like)
+		}
 	}
 
 	query := fmt.Sprintf(`
