@@ -116,7 +116,7 @@
           </div>
           <div class="mt-3 flex items-center gap-4 text-xs text-slate-600">
             <span>{{ employer.planType }} plan</span>
-            <span v-if="employer.employees">· {{ employer.employees.toLocaleString() }} employees</span>
+            <span v-if="employer.employees">· {{ employer.employees.toLocaleString() }} covered lives</span>
             <span v-if="employer.hasPriceData" class="text-emerald-500">✓ Price data available</span>
             <span v-else class="text-amber-500">⚠ No price data</span>
           </div>

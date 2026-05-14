@@ -61,7 +61,7 @@
               <th class="px-4 py-3 text-slate-400 font-medium">EIN</th>
               <th class="px-4 py-3 text-slate-400 font-medium">State</th>
               <th class="px-4 py-3 text-slate-400 font-medium">Plan Type</th>
-              <th class="px-4 py-3 text-slate-400 font-medium">Employees</th>
+              <th class="px-4 py-3 text-slate-400 font-medium">Covered Lives</th>
               <th class="px-4 py-3 text-slate-400 font-medium">Networks</th>
             </tr>
           </thead>
