@@ -91,13 +91,14 @@ func (h *Handler) ListForm5500(w http.ResponseWriter, r *http.Request) {
 	}
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	fundingGenAsset := r.URL.Query().Get("funding_gen_asset_ind") == "1"
-	normalizedEINs := make([]string, 0, len(eins)*2)
+	// Normalize EINs to plain 9-digit form only; SQL normalizes the column with replace().
+	normalizedEINs := make([]string, 0, len(eins))
 	for _, ein := range eins {
-		plain, dashed := einVariants(ein)
+		plain := normalizeEIN(ein)
 		if plain == "" {
 			normalizedEINs = append(normalizedEINs, ein) // pass through non-EIN values unchanged
 		} else {
-			normalizedEINs = append(normalizedEINs, plain, dashed)
+			normalizedEINs = append(normalizedEINs, plain)
 		}
 	}
 	eins = normalizedEINs
@@ -177,7 +178,7 @@ func queryForm5500(ctx context.Context, conn *sql.DB, eins, sponsorNames []strin
 
 	if len(eins) > 0 {
 		einPlaceholders, next := placeholders(nextPlaceholder, len(eins))
-		searchConditions = append(searchConditions, fmt.Sprintf("spons_dfe_ein IN (%s)", einPlaceholders))
+		searchConditions = append(searchConditions, fmt.Sprintf("replace(spons_dfe_ein, '-', '') IN (%s)", einPlaceholders))
 		nextPlaceholder = next
 		for _, ein := range eins {
 			args = append(args, ein)
@@ -194,13 +195,12 @@ func queryForm5500(ctx context.Context, conn *sql.DB, eins, sponsorNames []strin
 	}
 
 	if q != "" {
-		plain, dashed := einVariants(q)
+		plain, _ := einVariants(q)
 		if plain != "" {
-			// q looks like an EIN — match either stored format exactly.
-			einPlaceholders, next := placeholders(nextPlaceholder, 2)
-			searchConditions = append(searchConditions, fmt.Sprintf("spons_dfe_ein IN (%s)", einPlaceholders))
-			args = append(args, plain, dashed)
-			nextPlaceholder = next
+			// q looks like an EIN — normalize both sides so either stored format matches.
+			searchConditions = append(searchConditions, fmt.Sprintf("replace(spons_dfe_ein, '-', '') = $%d", nextPlaceholder))
+			args = append(args, plain)
+			nextPlaceholder++
 		} else {
 			like := "%" + q + "%"
 			searchConditions = append(searchConditions, fmt.Sprintf(
@@ -249,7 +249,7 @@ func queryForm5500(ctx context.Context, conn *sql.DB, eins, sponsorNames []strin
 	}
 
 	query := fmt.Sprintf(`
-select
+select distinct on (replace(spons_dfe_ein, '-', ''))
 	ack_id
 	, coalesce(form_plan_year_begin_date, '') as form_plan_year_begin_date
 	, coalesce(form_tax_prd, '') as form_tax_prd
@@ -268,6 +268,7 @@ select
 	, coalesce(date_received, '') as date_received
 from form_5500
 where %s
+order by replace(spons_dfe_ein, '-', ''), date_received desc nulls last
 `, strings.Join(whereParts, " and "))
 
 	rows, err := conn.QueryContext(ctx, query, args...)
@@ -317,22 +318,21 @@ func queryForm5500Aetna(ctx context.Context, conn *sql.DB, eins, sponsorNames []
 	searchConditions := make([]string, 0, 3)
 	nextPlaceholder := 1
 
-	// Scope: restrict to EINs present in the Aetna MRF source.
-	mrfEINSlice := make([]string, 0, len(aetnaEINs)*2)
+	// Scope: restrict to EINs present in the Aetna MRF source using normalized comparison.
+	mrfEINSlice := make([]string, 0, len(aetnaEINs))
 	for plain := range aetnaEINs {
-		dashed := plain[:2] + "-" + plain[2:]
-		mrfEINSlice = append(mrfEINSlice, plain, dashed)
+		mrfEINSlice = append(mrfEINSlice, plain)
 	}
 	mrfPlaceholders, next := placeholders(nextPlaceholder, len(mrfEINSlice))
 	nextPlaceholder = next
-	scopeCondition := fmt.Sprintf("spons_dfe_ein IN (%s)", mrfPlaceholders)
+	scopeCondition := fmt.Sprintf("replace(spons_dfe_ein, '-', '') IN (%s)", mrfPlaceholders)
 	for _, e := range mrfEINSlice {
 		args = append(args, e)
 	}
 
 	if len(eins) > 0 {
 		einPlaceholders, next := placeholders(nextPlaceholder, len(eins))
-		searchConditions = append(searchConditions, fmt.Sprintf("spons_dfe_ein IN (%s)", einPlaceholders))
+		searchConditions = append(searchConditions, fmt.Sprintf("replace(spons_dfe_ein, '-', '') IN (%s)", einPlaceholders))
 		nextPlaceholder = next
 		for _, ein := range eins {
 			args = append(args, ein)
@@ -349,12 +349,11 @@ func queryForm5500Aetna(ctx context.Context, conn *sql.DB, eins, sponsorNames []
 	}
 
 	if q != "" {
-		plain, dashed := einVariants(q)
+		plain, _ := einVariants(q)
 		if plain != "" {
-			einPlaceholders, next := placeholders(nextPlaceholder, 2)
-			searchConditions = append(searchConditions, fmt.Sprintf("spons_dfe_ein IN (%s)", einPlaceholders))
-			args = append(args, plain, dashed)
-			nextPlaceholder = next
+			searchConditions = append(searchConditions, fmt.Sprintf("replace(spons_dfe_ein, '-', '') = $%d", nextPlaceholder))
+			args = append(args, plain)
+			nextPlaceholder++
 		} else {
 			like := "%" + q + "%"
 			searchConditions = append(searchConditions, fmt.Sprintf(
@@ -377,7 +376,7 @@ func queryForm5500Aetna(ctx context.Context, conn *sql.DB, eins, sponsorNames []
 	}
 
 	query := fmt.Sprintf(`
-select
+select distinct on (replace(spons_dfe_ein, '-', ''))
 	ack_id
 	, coalesce(form_plan_year_begin_date, '') as form_plan_year_begin_date
 	, coalesce(form_tax_prd, '') as form_tax_prd
@@ -396,6 +395,7 @@ select
 	, coalesce(date_received, '') as date_received
 from form_5500
 where %s
+order by replace(spons_dfe_ein, '-', ''), date_received desc nulls last
 `, strings.Join(whereParts, " and "))
 
 	rows, err := conn.QueryContext(ctx, query, args...)
@@ -437,75 +437,73 @@ where %s
 // the BCBSIL MRF in-memory source, instead of going through the
 // reporting_plans/indexes DB subquery used for other payors.
 func queryForm5500BCBSIL(ctx context.Context, conn *sql.DB, eins, sponsorNames []string, q string, bcbsilEINs map[string]struct{}, fundingGenAsset bool) ([]form5500, error) {
-if len(bcbsilEINs) == 0 {
-return []form5500{}, nil
-}
+	if len(bcbsilEINs) == 0 {
+		return []form5500{}, nil
+	}
 
-args := make([]any, 0)
-searchConditions := make([]string, 0, 3)
-nextPlaceholder := 1
+	args := make([]any, 0)
+	searchConditions := make([]string, 0, 3)
+	nextPlaceholder := 1
 
-// Scope: restrict to EINs present in the BCBSIL MRF filelist.
-mrfEINSlice := make([]string, 0, len(bcbsilEINs)*2)
-for plain := range bcbsilEINs {
-dashed := plain[:2] + "-" + plain[2:]
-mrfEINSlice = append(mrfEINSlice, plain, dashed)
-}
-mrfPlaceholders, next := placeholders(nextPlaceholder, len(mrfEINSlice))
-nextPlaceholder = next
-scopeCondition := fmt.Sprintf("spons_dfe_ein IN (%s)", mrfPlaceholders)
-for _, e := range mrfEINSlice {
-args = append(args, e)
-}
+	// Scope: restrict to EINs present in the BCBSIL MRF filelist using normalized comparison.
+	mrfEINSlice := make([]string, 0, len(bcbsilEINs))
+	for plain := range bcbsilEINs {
+		mrfEINSlice = append(mrfEINSlice, plain)
+	}
+	mrfPlaceholders, next := placeholders(nextPlaceholder, len(mrfEINSlice))
+	nextPlaceholder = next
+	scopeCondition := fmt.Sprintf("replace(spons_dfe_ein, '-', '') IN (%s)", mrfPlaceholders)
+	for _, e := range mrfEINSlice {
+		args = append(args, e)
+	}
 
-if len(eins) > 0 {
-einPlaceholders, next := placeholders(nextPlaceholder, len(eins))
-searchConditions = append(searchConditions, fmt.Sprintf("spons_dfe_ein IN (%s)", einPlaceholders))
-nextPlaceholder = next
-for _, ein := range eins {
-args = append(args, ein)
-}
-}
+	if len(eins) > 0 {
+		einPlaceholders, next := placeholders(nextPlaceholder, len(eins))
+		searchConditions = append(searchConditions, fmt.Sprintf("replace(spons_dfe_ein, '-', '') IN (%s)", einPlaceholders))
+		nextPlaceholder = next
+		for _, ein := range eins {
+			args = append(args, ein)
+		}
+	}
 
-if len(sponsorNames) > 0 {
-namePlaceholders, next := placeholders(nextPlaceholder, len(sponsorNames))
-searchConditions = append(searchConditions, fmt.Sprintf("sponsor_dfe_name IN (%s)", namePlaceholders))
-nextPlaceholder = next
-for _, name := range sponsorNames {
-args = append(args, name)
-}
-}
+	if len(sponsorNames) > 0 {
+		namePlaceholders, next := placeholders(nextPlaceholder, len(sponsorNames))
+		searchConditions = append(searchConditions, fmt.Sprintf("sponsor_dfe_name IN (%s)", namePlaceholders))
+		nextPlaceholder = next
+		for _, name := range sponsorNames {
+			args = append(args, name)
+		}
+	}
 
-if q != "" {
-plain, dashed := einVariants(q)
-if plain != "" {
-einPlaceholders, next := placeholders(nextPlaceholder, 2)
-searchConditions = append(searchConditions, fmt.Sprintf("spons_dfe_ein IN (%s)", einPlaceholders))
-args = append(args, plain, dashed)
-nextPlaceholder = next
-} else {
-like := "%" + q + "%"
-searchConditions = append(searchConditions, fmt.Sprintf(
-"(sponsor_dfe_name ILIKE $%d OR spons_dfe_ein ILIKE $%d)",
-nextPlaceholder, nextPlaceholder+1,
-))
-args = append(args, like, like)
-nextPlaceholder += 2
-}
-}
+	if q != "" {
+		plain, _ := einVariants(q)
+		if plain != "" {
+			searchConditions = append(searchConditions, fmt.Sprintf("replace(spons_dfe_ein, '-', '') = $%d", nextPlaceholder))
+			args = append(args, plain)
+			nextPlaceholder++
+		} else {
+			like := "%" + q + "%"
+			searchConditions = append(searchConditions, fmt.Sprintf(
+				"(sponsor_dfe_name ILIKE $%d OR spons_dfe_ein ILIKE $%d)",
+				nextPlaceholder, nextPlaceholder+1,
+			))
+			args = append(args, like, like)
+			nextPlaceholder += 2
+		}
+	}
 
-_ = nextPlaceholder
+	_ = nextPlaceholder
 
-whereParts := []string{scopeCondition}
-if fundingGenAsset {
-whereParts = append(whereParts, "funding_gen_asset_ind = '1'")
-}
-if len(searchConditions) > 0 {
-whereParts = append(whereParts, "("+strings.Join(searchConditions, " or ")+")")
-}
+	whereParts := []string{scopeCondition}
+	if fundingGenAsset {
+		whereParts = append(whereParts, "funding_gen_asset_ind = '1'")
+	}
+	if len(searchConditions) > 0 {
+		whereParts = append(whereParts, "("+strings.Join(searchConditions, " or ")+")")
+	}
 
-query := fmt.Sprintf(`
-select
+	query := fmt.Sprintf(`
+select distinct on (replace(spons_dfe_ein, '-', ''))
 ack_id
 , coalesce(form_plan_year_begin_date, '') as form_plan_year_begin_date
 , coalesce(form_tax_prd, '') as form_tax_prd
@@ -524,116 +522,115 @@ ack_id
 , coalesce(date_received, '') as date_received
 from form_5500
 where %s
+order by replace(spons_dfe_ein, '-', ''), date_received desc nulls last
 `, strings.Join(whereParts, " and "))
 
-rows, err := conn.QueryContext(ctx, query, args...)
-if err != nil {
-return nil, err
-}
-defer rows.Close()
+	rows, err := conn.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
 
-result := make([]form5500, 0)
-for rows.Next() {
-var f form5500
-if err := rows.Scan(
-&f.AckID,
-&f.FormPlanYearBeginDate,
-&f.FormTaxPrd,
-&f.PlanName,
-&f.PlanEffDate,
-&f.SponsorDfeName,
-&f.SponsDfeDbaName,
-&f.SponsDfeEin,
-&f.SponsDfeMailUsCity,
-&f.SponsDfeMailUsState,
-&f.SponsDfeMailUsZip,
-&f.TypePlanEntityCd,
-&f.TypeWelfareBnftCode,
-&f.TotActRtdSepBenefCnt,
-&f.FilingStatus,
-&f.DateReceived,
-); err != nil {
-return nil, err
-}
-result = append(result, f)
-}
+	result := make([]form5500, 0)
+	for rows.Next() {
+		var f form5500
+		if err := rows.Scan(
+			&f.AckID,
+			&f.FormPlanYearBeginDate,
+			&f.FormTaxPrd,
+			&f.PlanName,
+			&f.PlanEffDate,
+			&f.SponsorDfeName,
+			&f.SponsDfeDbaName,
+			&f.SponsDfeEin,
+			&f.SponsDfeMailUsCity,
+			&f.SponsDfeMailUsState,
+			&f.SponsDfeMailUsZip,
+			&f.TypePlanEntityCd,
+			&f.TypeWelfareBnftCode,
+			&f.TotActRtdSepBenefCnt,
+			&f.FilingStatus,
+			&f.DateReceived,
+		); err != nil {
+			return nil, err
+		}
+		result = append(result, f)
+	}
 
-return result, rows.Err()
+	return result, rows.Err()
 }
 
 // queryForm5500BCBSTX queries form_5500 records scoped to the EINs present in
 // the BCBSTX MRF in-memory source, instead of going through the
 // reporting_plans/indexes DB subquery used for other payors.
 func queryForm5500BCBSTX(ctx context.Context, conn *sql.DB, eins, sponsorNames []string, q string, bcbstxEINs map[string]struct{}, fundingGenAsset bool) ([]form5500, error) {
-if len(bcbstxEINs) == 0 {
-return []form5500{}, nil
-}
+	if len(bcbstxEINs) == 0 {
+		return []form5500{}, nil
+	}
 
-args := make([]any, 0)
-searchConditions := make([]string, 0, 3)
-nextPlaceholder := 1
+	args := make([]any, 0)
+	searchConditions := make([]string, 0, 3)
+	nextPlaceholder := 1
 
-// Scope: restrict to EINs present in the BCBSTX MRF filelist.
-mrfEINSlice := make([]string, 0, len(bcbstxEINs)*2)
-for plain := range bcbstxEINs {
-dashed := plain[:2] + "-" + plain[2:]
-mrfEINSlice = append(mrfEINSlice, plain, dashed)
-}
-mrfPlaceholders, next := placeholders(nextPlaceholder, len(mrfEINSlice))
-nextPlaceholder = next
-scopeCondition := fmt.Sprintf("spons_dfe_ein IN (%s)", mrfPlaceholders)
-for _, e := range mrfEINSlice {
-args = append(args, e)
-}
+	// Scope: restrict to EINs present in the BCBSTX MRF filelist using normalized comparison.
+	mrfEINSlice := make([]string, 0, len(bcbstxEINs))
+	for plain := range bcbstxEINs {
+		mrfEINSlice = append(mrfEINSlice, plain)
+	}
+	mrfPlaceholders, next := placeholders(nextPlaceholder, len(mrfEINSlice))
+	nextPlaceholder = next
+	scopeCondition := fmt.Sprintf("replace(spons_dfe_ein, '-', '') IN (%s)", mrfPlaceholders)
+	for _, e := range mrfEINSlice {
+		args = append(args, e)
+	}
 
-if len(eins) > 0 {
-einPlaceholders, next := placeholders(nextPlaceholder, len(eins))
-searchConditions = append(searchConditions, fmt.Sprintf("spons_dfe_ein IN (%s)", einPlaceholders))
-nextPlaceholder = next
-for _, ein := range eins {
-args = append(args, ein)
-}
-}
+	if len(eins) > 0 {
+		einPlaceholders, next := placeholders(nextPlaceholder, len(eins))
+		searchConditions = append(searchConditions, fmt.Sprintf("replace(spons_dfe_ein, '-', '') IN (%s)", einPlaceholders))
+		nextPlaceholder = next
+		for _, ein := range eins {
+			args = append(args, ein)
+		}
+	}
 
-if len(sponsorNames) > 0 {
-namePlaceholders, next := placeholders(nextPlaceholder, len(sponsorNames))
-searchConditions = append(searchConditions, fmt.Sprintf("sponsor_dfe_name IN (%s)", namePlaceholders))
-nextPlaceholder = next
-for _, name := range sponsorNames {
-args = append(args, name)
-}
-}
+	if len(sponsorNames) > 0 {
+		namePlaceholders, next := placeholders(nextPlaceholder, len(sponsorNames))
+		searchConditions = append(searchConditions, fmt.Sprintf("sponsor_dfe_name IN (%s)", namePlaceholders))
+		nextPlaceholder = next
+		for _, name := range sponsorNames {
+			args = append(args, name)
+		}
+	}
 
-if q != "" {
-plain, dashed := einVariants(q)
-if plain != "" {
-einPlaceholders, next := placeholders(nextPlaceholder, 2)
-searchConditions = append(searchConditions, fmt.Sprintf("spons_dfe_ein IN (%s)", einPlaceholders))
-args = append(args, plain, dashed)
-nextPlaceholder = next
-} else {
-like := "%" + q + "%"
-searchConditions = append(searchConditions, fmt.Sprintf(
-"(sponsor_dfe_name ILIKE $%d OR spons_dfe_ein ILIKE $%d)",
-nextPlaceholder, nextPlaceholder+1,
-))
-args = append(args, like, like)
-nextPlaceholder += 2
-}
-}
+	if q != "" {
+		plain, _ := einVariants(q)
+		if plain != "" {
+			searchConditions = append(searchConditions, fmt.Sprintf("replace(spons_dfe_ein, '-', '') = $%d", nextPlaceholder))
+			args = append(args, plain)
+			nextPlaceholder++
+		} else {
+			like := "%" + q + "%"
+			searchConditions = append(searchConditions, fmt.Sprintf(
+				"(sponsor_dfe_name ILIKE $%d OR spons_dfe_ein ILIKE $%d)",
+				nextPlaceholder, nextPlaceholder+1,
+			))
+			args = append(args, like, like)
+			nextPlaceholder += 2
+		}
+	}
 
-_ = nextPlaceholder
+	_ = nextPlaceholder
 
-whereParts := []string{scopeCondition}
-if fundingGenAsset {
-whereParts = append(whereParts, "funding_gen_asset_ind = '1'")
-}
-if len(searchConditions) > 0 {
-whereParts = append(whereParts, "("+strings.Join(searchConditions, " or ")+")")
-}
+	whereParts := []string{scopeCondition}
+	if fundingGenAsset {
+		whereParts = append(whereParts, "funding_gen_asset_ind = '1'")
+	}
+	if len(searchConditions) > 0 {
+		whereParts = append(whereParts, "("+strings.Join(searchConditions, " or ")+")")
+	}
 
-query := fmt.Sprintf(`
-select
+	query := fmt.Sprintf(`
+select distinct on (replace(spons_dfe_ein, '-', ''))
 ack_id
 , coalesce(form_plan_year_begin_date, '') as form_plan_year_begin_date
 , coalesce(form_tax_prd, '') as form_tax_prd
@@ -652,39 +649,40 @@ ack_id
 , coalesce(date_received, '') as date_received
 from form_5500
 where %s
+order by replace(spons_dfe_ein, '-', ''), date_received desc nulls last
 `, strings.Join(whereParts, " and "))
 
-rows, err := conn.QueryContext(ctx, query, args...)
-if err != nil {
-return nil, err
-}
-defer rows.Close()
+	rows, err := conn.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
 
-result := make([]form5500, 0)
-for rows.Next() {
-var f form5500
-if err := rows.Scan(
-&f.AckID,
-&f.FormPlanYearBeginDate,
-&f.FormTaxPrd,
-&f.PlanName,
-&f.PlanEffDate,
-&f.SponsorDfeName,
-&f.SponsDfeDbaName,
-&f.SponsDfeEin,
-&f.SponsDfeMailUsCity,
-&f.SponsDfeMailUsState,
-&f.SponsDfeMailUsZip,
-&f.TypePlanEntityCd,
-&f.TypeWelfareBnftCode,
-&f.TotActRtdSepBenefCnt,
-&f.FilingStatus,
-&f.DateReceived,
-); err != nil {
-return nil, err
-}
-result = append(result, f)
-}
+	result := make([]form5500, 0)
+	for rows.Next() {
+		var f form5500
+		if err := rows.Scan(
+			&f.AckID,
+			&f.FormPlanYearBeginDate,
+			&f.FormTaxPrd,
+			&f.PlanName,
+			&f.PlanEffDate,
+			&f.SponsorDfeName,
+			&f.SponsDfeDbaName,
+			&f.SponsDfeEin,
+			&f.SponsDfeMailUsCity,
+			&f.SponsDfeMailUsState,
+			&f.SponsDfeMailUsZip,
+			&f.TypePlanEntityCd,
+			&f.TypeWelfareBnftCode,
+			&f.TotActRtdSepBenefCnt,
+			&f.FilingStatus,
+			&f.DateReceived,
+		); err != nil {
+			return nil, err
+		}
+		result = append(result, f)
+	}
 
-return result, rows.Err()
+	return result, rows.Err()
 }
