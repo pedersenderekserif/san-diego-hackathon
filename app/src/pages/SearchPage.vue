@@ -44,6 +44,11 @@
       </button>
     </div>
 
+    <!-- Error state -->
+    <div v-if="error" class="mb-6 bg-red-500/10 border border-red-500/30 text-red-400 rounded-xl px-5 py-4 text-sm">
+      {{ error }}
+    </div>
+
     <!-- Results -->
     <div v-if="results.length > 0" class="space-y-3">
       <div
@@ -108,6 +113,7 @@ const loading = ref(false)
 const hasSearched = ref(false)
 const activeFilter = ref('all')
 const results = ref([])
+const error = ref(null)
 
 const filters = [
   { label: 'All Plans', value: 'all' },
@@ -116,44 +122,24 @@ const filters = [
   { label: 'Has Price Data', value: 'has-price-data' }
 ]
 
-// Placeholder mock data — replace with real API call
-const mockData = [
-  {
-    ein: '12-3456789',
-    name: 'Acme Manufacturing Corp',
-    state: 'CA',
-    industry: 'Manufacturing',
-    networks: ['BCBS PPO', 'Aetna Choice'],
-    planType: 'Self-funded',
-    employees: 4200,
-    hasPriceData: true
-  },
-  {
-    ein: '98-7654321',
-    name: 'Pacific Logistics Group',
-    state: 'CA',
-    industry: 'Transportation',
-    networks: ['UHC Choice Plus'],
-    planType: 'Self-funded',
-    employees: 1800,
+function mapFiling(f) {
+  return {
+    ein: f.spons_dfe_ein,
+    name: f.sponsor_dfe_name || f.spons_dfe_dba_name,
+    state: f.spons_dfe_mail_us_state,
+    planType: f.plan_name || 'Unknown',
+    employees: f.tot_act_rtd_sep_benef_cnt ? parseInt(f.tot_act_rtd_sep_benef_cnt, 10) || null : null,
+    networks: [],
+    industry: null,
     hasPriceData: false
-  },
-  {
-    ein: '55-1234567',
-    name: 'Sunrise Retail Partners',
-    state: 'TX',
-    industry: 'Retail',
-    networks: ['Cigna OAP'],
-    planType: 'Level-funded',
-    employees: 920,
-    hasPriceData: true
   }
-]
+}
 
 let debounceTimer = null
 
 function onInput() {
   clearTimeout(debounceTimer)
+  error.value = null
   if (!query.value.trim()) {
     results.value = []
     hasSearched.value = false
@@ -167,15 +153,18 @@ function onInput() {
 
 async function search(q) {
   try {
-    // TODO: replace with real API call, e.g.:
-    // const res = await fetch(`/api/employers?q=${encodeURIComponent(q)}`)
-    // results.value = await res.json()
-    const lower = q.toLowerCase()
-    results.value = mockData.filter(
-      (e) =>
-        e.name.toLowerCase().includes(lower) ||
-        e.ein.replace('-', '').includes(lower.replace('-', ''))
-    )
+    const res = await fetch(`/api/v1/form-5500?q=${encodeURIComponent(q)}`)
+    const json = await res.json()
+    if (!res.ok) {
+      error.value = json?.error?.message ?? 'An error occurred'
+      results.value = []
+    } else {
+      results.value = (json.data ?? []).map(mapFiling)
+    }
+    hasSearched.value = true
+  } catch (e) {
+    error.value = 'Failed to reach the API. Is the server running?'
+    results.value = []
     hasSearched.value = true
   } finally {
     loading.value = false

@@ -32,12 +32,13 @@ type form5500 struct {
 func ListForm5500(w http.ResponseWriter, r *http.Request) {
 	eins := parseStringFilter(r, "eins")
 	sponsorNames := parseStringFilter(r, "sponsor_names")
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
 
-	if len(eins) == 0 && len(sponsorNames) == 0 {
+	if len(eins) == 0 && len(sponsorNames) == 0 && q == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"error": map[string]string{
 				"code":    "missing_filters",
-				"message": "at least one of eins or sponsor_names is required",
+				"message": "at least one of eins, sponsor_names, or q is required",
 			},
 		})
 		return
@@ -55,7 +56,7 @@ func ListForm5500(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	filings, err := queryForm5500(r.Context(), conn, eins, sponsorNames)
+	filings, err := queryForm5500(r.Context(), conn, eins, sponsorNames, q)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{
 			"error": map[string]string{
@@ -74,9 +75,9 @@ func ListForm5500(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func queryForm5500(ctx context.Context, conn *sql.DB, eins, sponsorNames []string) ([]form5500, error) {
-	args := make([]any, 0, len(eins)+len(sponsorNames))
-	conditions := make([]string, 0, 2)
+func queryForm5500(ctx context.Context, conn *sql.DB, eins, sponsorNames []string, q string) ([]form5500, error) {
+	args := make([]any, 0, len(eins)+len(sponsorNames)+2)
+	conditions := make([]string, 0, 3)
 
 	nextPlaceholder := 1
 
@@ -90,11 +91,21 @@ func queryForm5500(ctx context.Context, conn *sql.DB, eins, sponsorNames []strin
 	}
 
 	if len(sponsorNames) > 0 {
-		namePlaceholders, _ := placeholders(nextPlaceholder, len(sponsorNames))
+		namePlaceholders, next := placeholders(nextPlaceholder, len(sponsorNames))
 		conditions = append(conditions, fmt.Sprintf("sponsor_dfe_name IN (%s)", namePlaceholders))
+		nextPlaceholder = next
 		for _, name := range sponsorNames {
 			args = append(args, name)
 		}
+	}
+
+	if q != "" {
+		like := "%" + q + "%"
+		conditions = append(conditions, fmt.Sprintf(
+			"(sponsor_dfe_name ILIKE $%d OR spons_dfe_ein ILIKE $%d)",
+			nextPlaceholder, nextPlaceholder+1,
+		))
+		args = append(args, like, like)
 	}
 
 	query := fmt.Sprintf(`
