@@ -63,52 +63,103 @@
       {{ error }}
     </div>
 
-    <!-- Scrollable results table -->
-    <div v-else-if="results.length > 0" class="rounded-xl border border-brand-900/20">
-      <div class="max-h-[400px] overflow-y-auto overflow-x-auto">
-        <table class="w-full text-sm text-left">
-          <thead class="sticky top-0 z-10">
-            <tr class="border-b border-brand-900/30 bg-brand-950">
-              <th class="px-4 py-3 text-slate-400 font-medium">Plan Sponsor</th>
-              <th class="px-4 py-3 text-slate-400 font-medium">EIN</th>
-              <th class="px-4 py-3 text-slate-400 font-medium">State</th>
-              <th class="px-4 py-3 text-slate-400 font-medium">Plan Name</th>
-              <th class="px-4 py-3 text-slate-400 font-medium">Plan Type</th>
-              <th class="px-4 py-3 text-slate-400 font-medium">Plan ID Type</th>
-              <th class="px-4 py-3 text-slate-400 font-medium">Market Type</th>
-              <th class="px-4 py-3 text-slate-400 font-medium">Covered Lives</th>
-              <th class="px-4 py-3 text-slate-400 font-medium">Networks</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="(row, i) in results"
-              :key="i"
-              class="border-b border-brand-900/10 hover:bg-brand-950/40 transition-colors"
+    <!-- Results cards -->
+    <div v-else-if="results.length > 0" class="max-h-[50vh] overflow-y-auto space-y-3 pr-1">
+      <template v-for="(row, i) in results" :key="row._key ?? i">
+        <!-- Employer card -->
+        <div
+          @click="selectEmployer(row)"
+          @keydown="onEmployerKeydown($event, row)"
+          role="button"
+          tabindex="0"
+          :class="[
+            'bg-slate-900 border rounded-xl p-5 transition-colors cursor-pointer group',
+            selectedEmployer?._key === row._key
+              ? 'border-brand-500 rounded-b-none'
+              : 'border-slate-800 hover:border-slate-600'
+          ]"
+        >
+          <div class="flex items-start justify-between gap-4">
+            <div class="min-w-0">
+              <h3 class="text-white font-semibold truncate group-hover:text-brand-400 transition-colors">{{ row.name }}</h3>
+              <div class="flex items-center gap-3 mt-1 text-sm text-slate-500">
+                <span>EIN: {{ row.ein }}</span>
+                <span>·</span>
+                <span>{{ row.state }}</span>
+              </div>
+            </div>
+            <div class="flex flex-col items-end gap-1.5 shrink-0">
+              <span
+                v-for="network in row.networks"
+                :key="network"
+                class="inline-block bg-brand-500/10 text-brand-400 text-xs font-medium px-2.5 py-0.5 rounded-full border border-brand-500/20"
+              >
+                {{ network }}
+              </span>
+              <!-- Expand/collapse chevron -->
+              <svg
+                :class="['h-4 w-4 text-slate-500 transition-transform mt-1', selectedEmployer?._key === row._key ? 'rotate-180 text-brand-400' : '']"
+                xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+              >
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+              </svg>
+            </div>
+          </div>
+          <div class="mt-3 flex items-center gap-4 text-xs text-slate-600">
+            <span>{{ row.planType }} plan</span>
+            <span v-if="row.planName">· Plan: {{ row.planName }}</span>
+            <span v-if="row.planIdType">· Plan ID Type: {{ row.planIdType }}</span>
+            <span v-if="row.employees">· {{ row.employees.toLocaleString() }} covered lives</span>
+            <span v-if="row.hasPriceData" class="text-emerald-500">✓ Price data available</span>
+            <span v-else class="text-amber-500">⚠ No price data</span>
+          </div>
+          <div v-if="row.adminName || row.adminPhone" class="mt-2 flex items-center gap-3 text-xs text-slate-500">
+            <span class="text-slate-600 font-medium">Admin:</span>
+            <span v-if="row.adminName">{{ row.adminName }}</span>
+            <span v-if="row.adminCity || row.adminState">· {{ [row.adminCity, row.adminState, row.adminZip].filter(Boolean).join(', ') }}</span>
+            <span v-if="row.adminPhone">· {{ row.adminPhone }}</span>
+          </div>
+        </div>
+
+        <!-- Expansion row: reporting plans inline below selected employer -->
+        <div
+          v-if="selectedEmployer?._key === row._key"
+          class="bg-slate-950 border border-brand-500 border-t-0 rounded-b-xl px-5 py-4 -mt-3"
+        >
+          <h2 class="text-sm font-semibold text-brand-400 mb-3">Reporting Plans</h2>
+
+          <div v-if="reportingPlansLoading" class="text-slate-400 text-sm">Loading reporting plans…</div>
+
+          <div v-else-if="reportingPlansError" class="bg-red-500/10 border border-red-500/30 text-red-400 rounded-xl px-4 py-3 text-sm">
+            {{ reportingPlansError }}
+          </div>
+
+          <div v-else-if="expandedReportingPlans.length === 0" class="text-slate-500 text-sm">
+            No reporting plans found for this employer.
+          </div>
+
+          <div v-else class="space-y-2">
+            <div
+              v-for="plan in expandedReportingPlans"
+              :key="plan.id"
+              class="bg-slate-900 border border-slate-800 rounded-xl px-4 py-3"
             >
-              <td class="px-4 py-3 text-white font-medium">{{ row.name }}</td>
-              <td class="px-4 py-3 text-slate-300 font-mono text-xs">{{ row.ein }}</td>
-              <td class="px-4 py-3 text-slate-300">{{ row.state }}</td>
-              <td class="px-4 py-3 text-slate-300">{{ row.planName ?? '—' }}</td>
-              <td class="px-4 py-3 text-slate-300">{{ row.planType }}</td>
-              <td class="px-4 py-3 text-slate-300">{{ row.planIdType ?? '—' }}</td>
-              <td class="px-4 py-3 text-slate-300">{{ row.planMarketType ?? '—' }}</td>
-              <td class="px-4 py-3 text-slate-300">{{ row.employees?.toLocaleString() ?? '—' }}</td>
-              <td class="px-4 py-3">
-                <span
-                  v-for="network in row.networks"
-                  :key="network"
-                  class="inline-block bg-brand-500/10 text-brand-400 text-xs font-medium px-2 py-0.5 rounded-full border border-brand-500/20 mr-1"
-                >
-                  {{ network }}
-                </span>
-                <span v-if="row.networks.length === 0" class="text-slate-600 text-xs">—</span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <div class="text-xs text-slate-500 px-4 py-3 bg-brand-950/30 border-t border-brand-900/20">
+              <div class="flex items-center justify-between gap-3">
+                <h3 class="text-sm font-medium text-white truncate">{{ plan.plan_name || 'Unnamed Plan' }}</h3>
+                <span class="text-xs text-slate-400 shrink-0">{{ plan.plan_market_type }}</span>
+              </div>
+              <div class="mt-1 text-xs text-slate-500">
+                <span>ID: {{ plan.plan_id }}</span>
+                <span> · </span>
+                <span>Type: {{ plan.plan_id_type }}</span>
+                <span v-if="plan.issuer_name"> · Issuer: {{ plan.issuer_name }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <div class="text-xs text-slate-500 px-1 py-2">
         Showing {{ results.length }} plan{{ results.length !== 1 ? 's' : '' }}
       </div>
     </div>
@@ -140,6 +191,11 @@ const loading = ref(false)
 const hasSearched = ref(false)
 const error = ref(null)
 const fundingGenAssetOnly = ref(false)
+
+const selectedEmployer = ref(null)
+const expandedReportingPlans = ref([])
+const reportingPlansLoading = ref(false)
+const reportingPlansError = ref(null)
 
 const payorOptions = ref([])
 const payorLoading = ref(false)
@@ -180,7 +236,12 @@ function mapFiling(f, index) {
     planMarketType: null,
     employees: f.tot_act_rtd_sep_benef_cnt ? parseInt(f.tot_act_rtd_sep_benef_cnt, 10) || null : null,
     networks,
-    hasPriceData: networks.length > 0
+    hasPriceData: networks.length > 0,
+    adminName: f.admin_name || null,
+    adminPhone: f.admin_phone_num || null,
+    adminCity: f.admin_us_city || null,
+    adminState: f.admin_us_state || null,
+    adminZip: f.admin_us_zip || null,
   }
 }
 
@@ -324,9 +385,59 @@ async function loadBCBSTXEINs() {
   }
 }
 
+function onEmployerKeydown(event, employer) {
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault()
+    selectEmployer(employer)
+  }
+}
+
+async function selectEmployer(employer) {
+  if (selectedEmployer.value?._key === employer._key) {
+    selectedEmployer.value = null
+    expandedReportingPlans.value = []
+    reportingPlansError.value = null
+    return
+  }
+
+  selectedEmployer.value = employer
+  reportingPlansError.value = null
+  expandedReportingPlans.value = []
+  reportingPlansLoading.value = true
+
+  try {
+    const filters = await ensureReportingPlanFilters()
+    const params = new URLSearchParams()
+    params.set('eins', employer.ein)
+    const effectivePayorId = selectedPayorId.value !== 'select_payor' ? selectedPayorId.value : null
+    if (effectivePayorId) {
+      params.append('ingestor_ids', effectivePayorId)
+    } else {
+      for (const id of filters?.ingestor_ids ?? []) params.append('ingestor_ids', id)
+    }
+    for (const t of filters?.plan_id_types ?? []) params.append('plan_id_types', t)
+    for (const m of filters?.plan_market_types ?? []) params.append('plan_market_types', m)
+
+    const res = await fetch(`/api/v1/reporting-plans?${params.toString()}`)
+    const json = await res.json()
+    if (!res.ok) {
+      reportingPlansError.value = json?.error?.message ?? 'Failed to fetch reporting plans'
+      return
+    }
+    expandedReportingPlans.value = json?.data ?? []
+  } catch (fetchError) {
+    reportingPlansError.value = fetchError?.message || 'Failed to fetch reporting plans'
+  } finally {
+    reportingPlansLoading.value = false
+  }
+}
+
 function onPayorChange() {
   error.value = null
   results.value = []
+  selectedEmployer.value = null
+  expandedReportingPlans.value = []
+  reportingPlansError.value = null
 
   if (selectedPayorId.value === 'select_payor') {
     hasSearched.value = false

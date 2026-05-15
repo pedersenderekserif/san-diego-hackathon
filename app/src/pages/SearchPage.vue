@@ -136,6 +136,12 @@
             <span v-if="employer.hasPriceData" class="text-emerald-500">✓ Price data available</span>
             <span v-else class="text-amber-500">⚠ No price data</span>
           </div>
+          <div v-if="employer.adminName || employer.adminPhone" class="mt-2 flex items-center gap-3 text-xs text-slate-500">
+            <span class="text-slate-600 font-medium">Admin:</span>
+            <span v-if="employer.adminName">{{ employer.adminName }}</span>
+            <span v-if="employer.adminCity || employer.adminState">· {{ [employer.adminCity, employer.adminState, employer.adminZip].filter(Boolean).join(', ') }}</span>
+            <span v-if="employer.adminPhone">· {{ employer.adminPhone }}</span>
+          </div>
         </div>
 
         <!-- Expansion row: reporting plans inline below selected employer -->
@@ -245,7 +251,12 @@ function mapFiling(f, index) {
     employees: f.tot_act_rtd_sep_benef_cnt ? parseInt(f.tot_act_rtd_sep_benef_cnt, 10) || null : null,
     networks,
     industry: null,
-    hasPriceData: networks.length > 0
+    hasPriceData: networks.length > 0,
+    adminName: f.admin_name || null,
+    adminPhone: f.admin_phone_num || null,
+    adminCity: f.admin_us_city || null,
+    adminState: f.admin_us_state || null,
+    adminZip: f.admin_us_zip || null,
   }
 }
 

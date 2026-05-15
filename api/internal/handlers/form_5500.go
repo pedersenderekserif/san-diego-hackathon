@@ -53,6 +53,11 @@ type form5500 struct {
 	TotActRtdSepBenefCnt  string `json:"tot_act_rtd_sep_benef_cnt"`
 	FilingStatus          string `json:"filing_status"`
 	DateReceived          string `json:"date_received"`
+	AdminName             string `json:"admin_name"`
+	AdminPhoneNum         string `json:"admin_phone_num"`
+	AdminUsCity           string `json:"admin_us_city"`
+	AdminUsState          string `json:"admin_us_state"`
+	AdminUsZip            string `json:"admin_us_zip"`
 }
 
 // aetnaPayorID is the well-known payor_id (== ingestor_id) for Aetna. When this
@@ -266,6 +271,11 @@ select distinct on (replace(spons_dfe_ein, '-', ''))
 	, coalesce(tot_act_rtd_sep_benef_cnt, '') as tot_act_rtd_sep_benef_cnt
 	, coalesce(filing_status, '') as filing_status
 	, coalesce(date_received, '') as date_received
+	, coalesce(admin_name, '') as admin_name
+	, coalesce(admin_phone_num, '') as admin_phone_num
+	, coalesce(admin_us_city, '') as admin_us_city
+	, coalesce(admin_us_state, '') as admin_us_state
+	, coalesce(admin_us_zip, '') as admin_us_zip
 from form_5500
 where %s
 order by replace(spons_dfe_ein, '-', ''), date_received desc nulls last
@@ -297,6 +307,11 @@ order by replace(spons_dfe_ein, '-', ''), date_received desc nulls last
 			&f.TotActRtdSepBenefCnt,
 			&f.FilingStatus,
 			&f.DateReceived,
+			&f.AdminName,
+			&f.AdminPhoneNum,
+			&f.AdminUsCity,
+			&f.AdminUsState,
+			&f.AdminUsZip,
 		); err != nil {
 			return nil, err
 		}
@@ -393,6 +408,11 @@ select distinct on (replace(spons_dfe_ein, '-', ''))
 	, coalesce(tot_act_rtd_sep_benef_cnt, '') as tot_act_rtd_sep_benef_cnt
 	, coalesce(filing_status, '') as filing_status
 	, coalesce(date_received, '') as date_received
+	, coalesce(admin_name, '') as admin_name
+	, coalesce(admin_phone_num, '') as admin_phone_num
+	, coalesce(admin_us_city, '') as admin_us_city
+	, coalesce(admin_us_state, '') as admin_us_state
+	, coalesce(admin_us_zip, '') as admin_us_zip
 from form_5500
 where %s
 order by replace(spons_dfe_ein, '-', ''), date_received desc nulls last
@@ -424,6 +444,11 @@ order by replace(spons_dfe_ein, '-', ''), date_received desc nulls last
 			&f.TotActRtdSepBenefCnt,
 			&f.FilingStatus,
 			&f.DateReceived,
+			&f.AdminName,
+			&f.AdminPhoneNum,
+			&f.AdminUsCity,
+			&f.AdminUsState,
+			&f.AdminUsZip,
 		); err != nil {
 			return nil, err
 		}
@@ -520,6 +545,11 @@ ack_id
 , coalesce(tot_act_rtd_sep_benef_cnt, '') as tot_act_rtd_sep_benef_cnt
 , coalesce(filing_status, '') as filing_status
 , coalesce(date_received, '') as date_received
+, coalesce(admin_name, '') as admin_name
+, coalesce(admin_phone_num, '') as admin_phone_num
+, coalesce(admin_us_city, '') as admin_us_city
+, coalesce(admin_us_state, '') as admin_us_state
+, coalesce(admin_us_zip, '') as admin_us_zip
 from form_5500
 where %s
 order by replace(spons_dfe_ein, '-', ''), date_received desc nulls last
@@ -551,6 +581,11 @@ order by replace(spons_dfe_ein, '-', ''), date_received desc nulls last
 			&f.TotActRtdSepBenefCnt,
 			&f.FilingStatus,
 			&f.DateReceived,
+			&f.AdminName,
+			&f.AdminPhoneNum,
+			&f.AdminUsCity,
+			&f.AdminUsState,
+			&f.AdminUsZip,
 		); err != nil {
 			return nil, err
 		}
@@ -647,6 +682,11 @@ ack_id
 , coalesce(tot_act_rtd_sep_benef_cnt, '') as tot_act_rtd_sep_benef_cnt
 , coalesce(filing_status, '') as filing_status
 , coalesce(date_received, '') as date_received
+, coalesce(admin_name, '') as admin_name
+, coalesce(admin_phone_num, '') as admin_phone_num
+, coalesce(admin_us_city, '') as admin_us_city
+, coalesce(admin_us_state, '') as admin_us_state
+, coalesce(admin_us_zip, '') as admin_us_zip
 from form_5500
 where %s
 order by replace(spons_dfe_ein, '-', ''), date_received desc nulls last
@@ -678,6 +718,11 @@ order by replace(spons_dfe_ein, '-', ''), date_received desc nulls last
 			&f.TotActRtdSepBenefCnt,
 			&f.FilingStatus,
 			&f.DateReceived,
+			&f.AdminName,
+			&f.AdminPhoneNum,
+			&f.AdminUsCity,
+			&f.AdminUsState,
+			&f.AdminUsZip,
 		); err != nil {
 			return nil, err
 		}
